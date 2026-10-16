@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+node_modules/
+dist/
+build/
+*.log
+backend/data/traces/*.jsonl
+!backend/data/traces/.gitkeep
+research/results/*
+!research/results/.gitkeep
+.DS_Store
+.idea/
+.vscode/

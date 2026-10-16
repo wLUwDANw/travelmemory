@@ -1,0 +1,22 @@
+# 阶段 0 运行时依赖（精简：只放真正用到的包）
+#
+# 说明：本项目禁止把依赖装到系统 Python。请使用项目内虚拟环境：
+#   python -m venv .venv  →  .venv/Scripts/pip install -r requirements.txt
+# 新增依赖时必须同时更新本文件，并在注释里写清用途。
+
+# ---- Web / 服务壳 ----
+fastapi>=0.115           # HTTP 接口层（阶段 0 仅健康检查，阶段 2 起 SSE）
+uvicorn[standard]>=0.30  # ASGI 服务器，make dev 依赖
+
+# ---- 数据层 ----
+sqlalchemy[asyncio]>=2.0.30  # ORM，全项目统一 2.0 风格（Session.execute / mapped_column）
+asyncpg>=0.29                # PostgreSQL 异步驱动
+alembic>=1.13                # 数据库迁移
+pgvector>=0.2.5              # pgvector 的 SQLAlchemy 类型（Vector 列）
+
+# ---- 配置与契约 ----
+pydantic>=2.7            # 数据校验
+pydantic-settings>=2.3   # 从 .env 读取配置（见 app/core/config.py）
+
+# ---- 外部调用 ----
+httpx>=0.27              # 统一的网络出口：LLM / Embedding 都走 OpenAI 兼容协议

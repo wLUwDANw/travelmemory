@@ -1,0 +1,33 @@
+# 语义标签字典 —— 版本化，变更必须 make resemantic 并重跑全部实验
+version: "sem-2026.1"
+
+tags:
+  - id: heritage
+    zh: 人文历史
+    poi_types: [文物古迹, 宗教场所, 风景名胜]
+    hints: [古镇, 古城, 博物馆, 石窟, 寺庙, 遗址]
+  - id: nature
+    zh: 自然风光
+    poi_types: [自然风光, 公园广场, 山川, 湖泊]
+    hints: [山, 湖, 森林, 草原, 海边]
+  - id: watertown
+    zh: 水乡古镇
+    hints: [水乡, 古镇, 古村, 园林]
+  - id: metropolis
+    zh: 都市风光
+    poi_types: [商务楼宇, 购物中心, 地标]
+    hints: [外滩, 陆家嘴, CBD, 商圈, 天际线]
+  - id: leisure
+    zh: 休闲度假
+    hints: [度假, 温泉, 露营]
+  - id: food
+    zh: 美食探索
+    poi_types: [餐饮服务, 美食街]
+    hints: [小吃街, 夜市, 老字号]
+
+fallback: unknown
+
+# 抽取顺序（成本从低到高，命中即停）：
+#   1. Place.poi_type 映射
+#   2. Photo.ai_tags 关键词匹配
+#   3. LLM 兜底（必须幂等缓存：unique(trip_item_id, semantic_version)）
