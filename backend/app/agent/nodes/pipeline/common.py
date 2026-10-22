@@ -49,7 +49,7 @@ def strip_prefix_label(text: str) -> str:
 
 def clean_llm_text(text: str, *, max_chars: int = 300) -> str:
     """清理 LLM 输出：去代码块围栏、去包裹引号、过长则判为异常返回空串。"""
-    cleaned = _FENCE_RE.sub("", text).strip().strip('"\'“”‘’').strip()
+    cleaned = _FENCE_RE.sub("", text).strip().strip("\"'“”‘’").strip()
     if len(cleaned) > max_chars:
         # 说明模型没按指令只输出一句话，宁可退回原问题也不要污染检索串
         return ""

@@ -11,7 +11,9 @@ def test_short_text_returns_single_chunk():
 
 
 def test_long_text_is_split():
-    sentences = ["第 %d 天，我们在%s拍了很多照片。" % (i, "乌镇" if i % 2 else "西塘") for i in range(200)]
+    sentences = [
+        f"第 {i} 天，我们在{'乌镇' if i % 2 else '西塘'}拍了很多照片。" for i in range(200)
+    ]
     chunks = chunk_text("".join(sentences), ChunkConfig(max_tokens=200))
     assert len(chunks) > 1
 

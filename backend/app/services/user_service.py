@@ -25,13 +25,15 @@ async def get_or_create_demo_user(
     settings = settings or get_settings()
     target_name = name or settings.demo_user_name
 
-    existing = (await session.execute(select(User).where(User.name == target_name))).scalar_one_or_none()
+    existing = (
+        await session.execute(select(User).where(User.name == target_name))
+    ).scalar_one_or_none()
     if existing is not None:
         return existing
 
     user = User(name=target_name)
     session.add(user)
-    await session.flush()   # 拿到 id
+    await session.flush()  # 拿到 id
     return user
 
 

@@ -8,6 +8,9 @@
 from app.models.base import Base
 from app.models.document import Document
 from app.models.eval import EvalCase, EvalResult
+from app.models.jobs import IngestJob
+from app.models.memory import MemoryItem, MemorySource
+from app.models.photo import Photo
 from app.models.traces import AgentRun, AgentStep, ToolCallLog
 from app.models.user import User
 
@@ -18,6 +21,10 @@ __all__ = [
     "Document",
     "EvalCase",
     "EvalResult",
+    "IngestJob",
+    "MemoryItem",
+    "MemorySource",
+    "Photo",
     "ToolCallLog",
     "User",
 ]

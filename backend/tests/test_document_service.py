@@ -18,10 +18,10 @@ import math
 import uuid
 
 import pytest
+from conftest import db_reachable
 from sqlalchemy import text
 
-from app.core.config import get_settings
-from app.db.session import SessionFactory, dispose_engine, ping_database
+from app.db.session import SessionFactory, dispose_engine
 from app.models.user import User
 from app.schemas.document import DocumentRef, DocumentUpsert
 from app.services.document_service import DocumentService
@@ -32,7 +32,7 @@ pytestmark = pytest.mark.db
 @pytest.fixture
 async def db_ready():
     """数据库不可用时跳过；可用时返回一个附着到临时用户的 service。"""
-    if not await ping_database():
+    if not await db_reachable():
         pytest.skip("未检测到 PostgreSQL，跳过（make up && make migrate 后可运行）")
     yield
     await dispose_engine()
@@ -52,6 +52,25 @@ async def _create_user(session) -> User:
     return user
 
 
+async def _column_dim(session) -> int:
+    """读取库中 embedding 列的真实维度。
+
+    不能用 settings.embedding_dim：单测环境（conftest）把它改成了 256，
+    而真实库的列是迁移时按当时的 EMBEDDING_DIM 建的（1024）。
+    """
+    result = await session.execute(
+        text(
+            """
+            SELECT a.atttypmod
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            WHERE c.relname = 'document' AND a.attname = 'embedding'
+            """
+        )
+    )
+    return int(result.scalar_one())
+
+
 async def test_extensions_installed(db_ready):
     async with SessionFactory() as session:
         rows = (await session.execute(text("SELECT extname FROM pg_extension"))).scalars().all()
@@ -60,15 +79,15 @@ async def test_extensions_installed(db_ready):
 
 
 async def test_upsert_is_idempotent_and_searchable(db_ready):
-    settings = get_settings()
-    dim = settings.embedding_dim
-
     async with SessionFactory() as session:
         user = await _create_user(session)
         service = DocumentService(session)
+        dim = await _column_dim(session)
 
         item = DocumentUpsert(
-            ref=DocumentRef(source_type="note", source_id=f"unit-{uuid.uuid4().hex[:8]}", chunk_index=0),
+            ref=DocumentRef(
+                source_type="note", source_id=f"unit-{uuid.uuid4().hex[:8]}", chunk_index=0
+            ),
             content="单元测试用的乌镇游记",
             metadata={"city": "嘉兴"},
             token_count=10,

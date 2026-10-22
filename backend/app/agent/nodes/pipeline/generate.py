@@ -33,31 +33,16 @@ class GenerateNode:
         ) as step:
             # ---- 情况一：没有证据，直接拒答 ----
             if not state.blocks:
-                state.refused = True
-                state.refuse_reason = "no_evidence"
-                state.answer = NO_EVIDENCE_ANSWER
-                state.citations = []
+                self._refuse(state)
                 step.output = {"refused": True, "reason": "no_evidence"}
                 return
 
             # ---- 情况二：有证据，按 system 规则生成 ----
-            prompt = render(
-                "generate",
-                context=_ensure_numbered(state),
-                question=state.query,
-                today=today_text(),
-            )
             result = await self.llm.chat(
-                [
-                    LLMMessage(role="system", content=load("system")),
-                    LLMMessage(role="user", content=prompt),
-                ],
+                self._messages(state),
                 purpose="generate",
             )
-            state.answer = result.content.strip()
-            state.refused = False
-            state.refuse_reason = ""
-            state.citations = _cited_refs(state)
+            self._finalize(state, result.content.strip())
             state.token_usage = {
                 "prompt_tokens": result.prompt_tokens,
                 "completion_tokens": result.completion_tokens,
@@ -69,6 +54,71 @@ class GenerateNode:
                 "latency_ms": result.latency_ms,
                 "cost_cents": result.cost_cents,
             }
+
+    async def astream(self, state: PipelineState, trace: Trace):
+        """流式生成（阶段 2 W2-3）：逐段 yield 文本，结束后回填 state。
+
+        关键约束：**引用校验必须在完整答案上做**。
+        流式每来一段就检查一次是错的 —— 答案才写到一半时当然没有引用，
+        会误判成"缺少引用"。所以 self_check 只在流结束后跑一次。
+        """
+        async with trace.step(
+            "generate",
+            {"question": state.query, "evidence_count": len(state.blocks), "stream": True},
+        ) as step:
+            if not state.blocks:
+                self._refuse(state)
+                step.output = {"refused": True, "reason": "no_evidence"}
+                yield state.answer
+                return
+
+            chunks: list[str] = []
+            async for chunk in self.llm.astream_chat(self._messages(state), purpose="generate"):
+                chunks.append(chunk)
+                yield chunk
+
+            self._finalize(state, "".join(chunks).strip())
+            usage = self.llm.last_stream_usage
+            if usage is not None:
+                state.token_usage = {
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "cost_cents": usage.cost_cents,
+                }
+            step.output = {
+                "answer": state.answer,
+                "citations": [str(ref) for ref in state.citations],
+                "streamed": True,
+            }
+
+    # ---------------------------------------------------------------- 内部
+    def _messages(self, state: PipelineState) -> list[LLMMessage]:
+        """system 规则 + 带编号证据 + 问题。两条路径共用，避免 prompt 走样。"""
+        prompt = render(
+            "generate",
+            context=_ensure_numbered(state),
+            question=state.query,
+            today=today_text(),
+        )
+        return [
+            LLMMessage(role="system", content=load("system")),
+            LLMMessage(role="user", content=prompt),
+        ]
+
+    @staticmethod
+    def _refuse(state: PipelineState) -> None:
+        """无证据：连 LLM 都不调用（省一次钱，也避免模型自由发挥）。"""
+        state.refused = True
+        state.refuse_reason = "no_evidence"
+        state.answer = NO_EVIDENCE_ANSWER
+        state.citations = []
+
+    @staticmethod
+    def _finalize(state: PipelineState, answer: str) -> None:
+        state.answer = answer
+        state.refused = False
+        state.refuse_reason = ""
+        state.citations = _cited_refs(state)
 
 
 def _ensure_numbered(state: PipelineState) -> str:

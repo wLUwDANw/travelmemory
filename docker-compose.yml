@@ -4,9 +4,13 @@
 #   阶段 3~5 : docker compose --profile stage3 up -d
 #   阶段 6+  : docker compose --profile stage3 --profile stage6 up -d
 #   部署     : docker compose --profile stage3 --profile stage6 --profile prod up -d
+#
+# ⚠ 编码要求（Windows 踩过坑）：本文件必须保存为「UTF-8 无 BOM」。
+#    带 BOM 时 Docker 会报 `invalid trailing UTF-8 octet`，且报错信息看不出是 BOM 引起的。
 
 services:
   db:
+    # build 而非 image：PostGIS 与 pgvector 官方都没有合一镜像，必须自建
     build: ./backend/docker/db
     environment:
       POSTGRES_USER: user

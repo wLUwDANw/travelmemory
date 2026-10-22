@@ -1,0 +1,308 @@
+/* 阶段 2 的最小样式。
+ *
+ * 为什么现在不用 Tailwind：本阶段只是「对话页骨架」，一套 CSS 变量 + 少量类就能跑，
+ * 引入 Tailwind 与 shadcn/ui 的收益要到阶段 6（地图 + 多页面）才体现出来。
+ * 到那时一次性接入，避免现在为了骨架引入、后面再推翻重做。
+ */
+
+:root {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --border: #e3e2de;
+  --text: #24231f;
+  --muted: #7b7a73;
+  --accent: #2f6f5e;
+  --user: #2f6f5e;
+  --danger: #b4483c;
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.agent-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.agent-header h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.agent-header .hint,
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.message-list {
+  flex: 1;
+  margin: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.message-user {
+  align-items: flex-end;
+}
+
+.bubble {
+  max-width: 78%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.7;
+  font-size: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-assistant .bubble {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.message-user .bubble {
+  background: var(--user);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  margin-left: 2px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.chip-label {
+  color: var(--muted);
+}
+
+.chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef3f0;
+  border: 1px solid #dbe5df;
+  color: var(--accent);
+}
+
+.meta-row {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.meta-row .refused {
+  color: var(--danger);
+}
+
+.evidence {
+  font-size: 12px;
+}
+
+.evidence-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.evidence-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.evidence-list li {
+  margin-bottom: 8px;
+}
+
+.evidence-list p {
+  margin: 2px 0 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding-top: 8px;
+}
+
+.composer input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 14px;
+  outline: none;
+  background: var(--panel);
+}
+
+.composer input:focus {
+  border-color: var(--accent);
+}
+
+.composer button {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.composer button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.composer button.stop {
+  background: var(--danger);
+}
+
+.error-bar {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fdeceb;
+  color: var(--danger);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+/* ---------------- 阶段 3：工具调用 ----------------
+   状态条与结果卡片的配色刻意与"证据"区分开：
+   记忆证据是用户的，工具结果是外部的，视觉上不该长得一样。 */
+
+.tool-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #eef4ff;
+  color: #35507a;
+  font-size: 12px;
+}
+
+.tool-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #b9cbe8;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: tool-spin 0.8s linear infinite;
+}
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tool-reason {
+  color: #7a8ba3;
+}
+
+.tool-card {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid #d9e3f5;
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: #fbfcff;
+  font-size: 12px;
+}
+
+.tool-card-failed {
+  border-left-color: var(--danger);
+  background: #fffaf9;
+}
+
+.tool-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.tool-flag-source {
+  color: #8a5a00;
+}
+
+.tool-flag {
+  color: var(--danger);
+}
+
+.tool-chip {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #eef1f6;
+  color: #5b6b82;
+}
+
+.tool-card-note {
+  margin: 6px 0 0;
+  color: #6b7a90;
+}

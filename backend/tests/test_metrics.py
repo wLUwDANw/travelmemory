@@ -36,7 +36,9 @@ def test_mrr_zero_when_no_hit():
 
 
 def test_is_refusal_matches_standard_wording():
-    assert is_refusal("抱歉，我在你的照片和行程记录里没有找到能支撑这个问题的证据，所以不替你编一个答案。")
+    assert is_refusal(
+        "抱歉，我在你的照片和行程记录里没有找到能支撑这个问题的证据，所以不替你编一个答案。"
+    )
     assert not is_refusal("你在 2025 年去过乌镇[1]。")
 
 

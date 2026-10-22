@@ -53,6 +53,8 @@ class EvalResult(Base):
     citation_rate: Mapped[float | None] = mapped_column(Float)
     #: 应当拒答时是否正确拒答（1.0 / 0.0），不该拒答时置 None
     refusal_correct: Mapped[float | None] = mapped_column(Float)
+    #: 阶段 5 W5-1：LLM-as-a-Judge 忠实度（1.0 / 0.0）；未评或拒答为 None
+    faithfulness: Mapped[float | None] = mapped_column(Float)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     prompt_version: Mapped[str | None] = mapped_column(String(32))

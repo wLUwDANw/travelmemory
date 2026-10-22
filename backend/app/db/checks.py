@@ -54,8 +54,18 @@ async def check_embedding_dim(session: AsyncSession, settings: Settings) -> list
 
 
 async def check_embedding_model(session: AsyncSession, settings: Settings) -> list[str]:
-    """检查库内主流 embedding_model（按出现次数最多的那一批算）。"""
-    row = (
+    """检查库内向量的 embedding_model，**任何混用都算问题**。
+
+    为什么不再只看"主流"那一批：曾经的做法是取 count 最多的模型与配置比对，
+    于是 39 条真实向量 + 31 条旧哈希向量的库会被判为"通过" ——
+    少数派脏向量足以把召回打乱，却因为不是主流而被放过。
+    这类问题的表现极其隐蔽：检索照样返回东西，只是该命中的不命中。
+
+    因此这里分两条独立判据：
+      1. 库里出现了**一个以上**的 model → 混用，必须 reindex
+      2. 主流 model 与当前配置不一致 → 换过模型没重建
+    """
+    rows = (
         await session.execute(
             text(
                 """
@@ -64,20 +74,34 @@ async def check_embedding_model(session: AsyncSession, settings: Settings) -> li
                 WHERE embedding_model IS NOT NULL
                 GROUP BY embedding_model
                 ORDER BY n DESC
-                LIMIT 1
                 """
             )
         )
-    ).first()
-    if row is None:
+    ).all()
+    if not rows:
         return []  # 空库：还没有向量，谈不上脏
-    dominant, count = row[0], int(row[1])
+
+    problems: list[str] = []
+    if len(rows) > 1:
+        breakdown = "，".join(f"{model} × {int(n)}" for model, n in rows)
+        problems.append(
+            f"库内向量来自多个模型（{breakdown}）—— 混用时查询只会和同源的那批相似，"
+            "另一批的相似度等于随机数，表现为「该命中的不命中」。请执行 make reindex。"
+        )
+
+    dominant, count = rows[0][0], int(rows[0][1])
     if dominant != settings.embedding_model_version:
-        return [
+        problems.append(
             f"库内主流向量来自 {dominant}（{count} 条），当前配置是 "
-            f"{settings.embedding_model_version}：请先执行 make reindex"
-        ]
-    return []
+            f"{settings.embedding_model_version}：请先执行 make reindex。"
+        )
+        # 离线占位模式最容易撞上这条：库里是哈希向量，.env 却还写着 bge-m3
+        problems.append(
+            "如果你在用离线占位模式（本地哈希向量），请把 .env 改成："
+            "EMBEDDING_PROVIDER=hashing / EMBEDDING_MODEL=hashing / "
+            "EMBEDDING_MODEL_VERSION=hashing-1024@v1（维度随 EMBEDDING_DIM 变化）"
+        )
+    return problems
 
 
 async def run_startup_checks(session: AsyncSession, settings: Settings | None = None) -> list[str]:

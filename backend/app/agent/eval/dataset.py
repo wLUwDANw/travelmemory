@@ -19,12 +19,24 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 
 from app.schemas.document import DocumentRef
 
+
+def _parse_date(value: str) -> date:
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
 #: 默认评测集位置（backend/data/eval_cases.jsonl）
 DEFAULT_DATASET_PATH = Path(__file__).resolve().parents[3] / "data" / "eval_cases.jsonl"
+
+#: 中文时间表达用例（backend/data/time_cases.jsonl）
+DEFAULT_TIME_CASES_PATH = Path(__file__).resolve().parents[3] / "data" / "time_cases.jsonl"
+
+#: 工具选择用例（backend/data/tool_cases.jsonl，阶段 3 W3-1）
+DEFAULT_TOOL_CASES_PATH = Path(__file__).resolve().parents[3] / "data" / "tool_cases.jsonl"
 
 
 @dataclass
@@ -75,6 +87,86 @@ def load_dataset(path: Path | str | None = None) -> list[EvalCaseItem]:
                 note=payload.get("note"),
             )
         )
+    return items
+
+
+@dataclass
+class TimeCaseItem:
+    """一条中文时间表达用例（W2-1 的出口条件就是它全过）。
+
+    为什么要自带 `today`：时间解析的结果依赖"今天"，写死日期才能让用例
+    **在任何时候跑都得到同一个答案**。否则明年再跑一遍，所有期望值都变了，
+    用例就从"回归测试"变成了"一次性快照"。
+    """
+
+    today: date
+    question: str
+    expected_start: date | None = None
+    expected_end: date | None = None
+
+    @property
+    def expects_range(self) -> bool:
+        return self.expected_start is not None and self.expected_end is not None
+
+
+def load_time_cases(path: Path | str | None = None) -> list[TimeCaseItem]:
+    """读取中文时间表达用例。"""
+    dataset_path = Path(path) if path else DEFAULT_TIME_CASES_PATH
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"时间表达用例不存在: {dataset_path}")
+
+    items: list[TimeCaseItem] = []
+    for lineno, line in enumerate(dataset_path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"时间用例第 {lineno} 行不是合法 JSON: {exc}") from exc
+        items.append(
+            TimeCaseItem(
+                today=_parse_date(payload["today"]),
+                question=payload["question"],
+                expected_start=_parse_date(payload["start"]) if payload.get("start") else None,
+                expected_end=_parse_date(payload["end"]) if payload.get("end") else None,
+            )
+        )
+    return items
+
+
+@dataclass
+class ToolCaseItem:
+    """一条工具选择用例。
+
+    `expected` 为 `None` 表示**不该调工具**（负例）。负例和正例同等重要：
+    只会"该调就调"的系统会把"我去年去过哪"也拿去查地图，既烧配额又答非所问。
+    """
+
+    question: str
+    expected: str | None = None
+
+    @property
+    def expects_tool(self) -> bool:
+        return self.expected is not None
+
+
+def load_tool_cases(path: Path | str | None = None) -> list[ToolCaseItem]:
+    """读取工具选择用例。"""
+    dataset_path = Path(path) if path else DEFAULT_TOOL_CASES_PATH
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"工具选择用例不存在: {dataset_path}")
+
+    items: list[ToolCaseItem] = []
+    for lineno, line in enumerate(dataset_path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"工具用例第 {lineno} 行不是合法 JSON: {exc}") from exc
+        items.append(ToolCaseItem(question=payload["question"], expected=payload.get("expected")))
     return items
 
 

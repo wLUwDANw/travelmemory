@@ -11,16 +11,15 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.core.config import get_settings  # 配置唯一入口：PROJECT.md 第 3 部分
-from app.models.base import Base
-
 # 导入全部模型，确保 Base.metadata 里包含所有表（autogenerate 依赖）
 import app.models  # noqa: F401
+from alembic import context
+from app.core.config import get_settings  # 配置唯一入口：PROJECT.md 第 3 部分
+from app.models.base import Base
 
 config = context.config
 

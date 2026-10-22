@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import uuid
 
 from app.agent.observability import Trace
@@ -114,6 +115,14 @@ async def interactive(user_id: uuid.UUID, session_id: str) -> None:
             "  回答由本地规则或哈希向量生成，只用于验证链路是否通畅，**不代表检索质量**。\n"
             "  在 .env 里填 LLM_API_KEY / LLM_BASE_URL 后重启即可切到真实模型。"
         )
+        # 哈希向量的余弦相似度普遍只有 0.05~0.13，沿用真实模型的阈值会导致"全部拒答"，
+        # 这里主动提醒，省得用户以为管道坏了。
+        if embedder.provider == "hashing" and settings.retrieval_min_score >= 0.2:
+            print(
+                f"  ⚠ 哈希向量相似度普遍偏低，当前 RETRIEVAL_MIN_SCORE={settings.retrieval_min_score} "
+                "会把证据全过滤掉（表现为一直拒答）。\n"
+                "    请把 .env 里的 RETRIEVAL_MIN_SCORE 改成 0.05 后重启。"
+            )
     _print_help()
 
     while True:
@@ -159,22 +168,30 @@ async def async_main(args: argparse.Namespace) -> int:
 
     session_id = args.session_id or f"cli-{uuid.uuid4().hex[:8]}"
 
-    if args.query:
-        settings = get_settings()
-        embedder = build_embedder(settings)
-        llm = build_llm(settings)
-        await _ask_once(
-            user_id=user.id,
-            session_id=session_id,
-            query=args.query,
-            history=[],
-            embedder=embedder,
-            llm=llm,
-        )
-    else:
-        await interactive(user.id, session_id)
-
-    await dispose_engine()
+    try:
+        if args.query:
+            settings = get_settings()
+            embedder = build_embedder(settings)
+            llm = build_llm(settings)
+            await _ask_once(
+                user_id=user.id,
+                session_id=session_id,
+                query=args.query,
+                history=[],
+                embedder=embedder,
+                llm=llm,
+            )
+        else:
+            await interactive(user.id, session_id)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # Ctrl+C 退出时，asyncio 会在关闭连接池的瞬间抛出 CancelledError。
+        # 这是正常的退出流程，不该打印一堆噪音吓人。
+        print("\n已退出。")
+    finally:
+        # Ctrl+C 后事件循环正在关闭，dispose 可能抛 Cancelled/Runtime，
+        # 这两种都是"已经退出"的正常噪音，吞掉即可。
+        with contextlib.suppress(asyncio.CancelledError, RuntimeError):
+            await dispose_engine()
     return 0
 
 

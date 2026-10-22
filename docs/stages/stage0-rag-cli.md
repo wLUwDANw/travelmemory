@@ -124,6 +124,10 @@ Document
 **为什么唯一键用三元组而不是自增 id？**
 自增 id 在重建库之后会变，评测集里写死的"期望命中的那条资料"就失效了。三元组（类型 + 稳定标识 + 第几块）在任何机器上都不变（设计文档 §4.5）。
 
+> 阶段 1 补充：这个键后来加上了 `user_id`（迁移 0003）。原因是两个用户的
+> `day/2025-10-03#0` 会撞在同一行上互相覆盖——详见
+> [stage1 第 9 节易错点](../stages/stage1-offline-jobs.md)。
+
 顺带一个好处：重复导入同一份资料会**覆盖而不是堆积**，重索引天然幂等、不会重复烧 embedding 的钱。
 
 ### 4.3 迁移做了什么
@@ -397,10 +401,96 @@ make cli           # 交互式问答
 8. **trace 写入失败不能让主流程失败**——它只是旁路设施。
 9. **`user_id` 过滤必须显式带上**，哪怕当前只有一个人用。
 10. **阶段范围别蔓延**：阶段 0 不要提前建 Photo/Trip 表，也不要写 HTTP 业务接口。
+11. **Windows 无 `make`**：手动执行等价命令，或 `winget install GnuWin32.Make`（见 10.1）。
+12. **`alembic.ini` 在中文 Windows 上会被 GBK 解码**：文件里别放中文注释（仓库已改为纯 ASCII）。
+13. **YAML 必须 UTF-8 无 BOM**：带 BOM 时 Docker 报 `invalid trailing UTF-8 octet`。
+14. **占位模式要把 `RETRIEVAL_MIN_SCORE` 降到 0.05**：否则一路拒答，会误以为管道坏了。
 
 ---
 
-## 10. 动手练习（验证你是否真的理解）
+## 10. Windows 实战记录（真实跑通过程）
+
+> 这一节记录 2026-10 在 Windows 11 家庭版 + PowerShell + Docker Desktop(WSL2) 上的真实执行过程，
+> 以及因此对本阶段代码/文档做的**永久性修改**。你已经跑过的同学可以对照复盘。
+
+### 10.1 环境差异与应对
+
+| 文档假设 | Windows 实际情况 | 应对 |
+| --- | --- | --- |
+| 用 `make` 跑命令 | PowerShell 没有 `make` | 手动执行等价命令，或 `winget install GnuWin32.Make`（README 有对照表） |
+| Docker Desktop 需要 Ubuntu 发行版 | 只需要 WSL 2 内核 | `wsl --install --no-distribution`（约 100MB，不用下 1GB 的 Ubuntu） |
+| `docker pull` 正常 | 加速器偶发 `denied` / 403 | 多备几个 registry-mirror 轮换 |
+| Alembic 读 ini 用 UTF-8 | 中文 Windows locale 是 GBK → 解码失败 | 把 `alembic.ini` 改成**纯 ASCII**（比转 GBK 更彻底，跨机器都不会再踩） |
+
+### 10.2 数据库镜像方案被替换了（原理要懂）
+
+原方案 `FROM postgis/postgis:16-3.4` + apt 装 pgvector，**实测不可行**：
+
+- 该镜像基于 Debian 11(bullseye)，其 PostgreSQL 官方源 `apt.postgresql.org` 已 404，归档源同样 404；
+- 源里没有 `postgresql-server-dev-16`，也没有 `postgresql-16-pgvector`；
+- 想从源码编译 pgvector，镜像内缺 `/usr/include/postgresql/16/server/` 头文件，编译失败。
+
+**改后的方案**（已写入仓库）：
+
+```dockerfile
+FROM pgvector/pgvector:pg16          # 基于 Debian 12(bookworm)，自带 pgvector
+RUN apt-get update && apt-get install -y postgresql-16-postgis-3
+```
+
+这就是"选型的时效性"：镜像基座的发行版一旦 EOL，依赖它的构建方案就会失效。
+排查这类问题的方法也很典型——**进容器里 `cat /etc/os-release` + `apt-cache search`，先确认发行版和源，再谈装包**。
+
+### 10.3 实际执行结果与指标
+
+```
+docker compose build --no-cache && docker compose up -d
+→ 容器 travelmemory-db-1 状态 Up (healthy)，三个扩展创建成功
+
+（backend 目录）alembic upgrade head
+→ INFO  [alembic.runtime.migration] Running upgrade  -> 0001, 阶段 0 初始 schema
+
+python -m app.scripts.seed_demo
+→ 导入完成：27 条记录 → 27 个 chunk
+
+python -m app.cli             → 出现交互提示符，事实回答带 [1][2]，下方列出证据
+python -m app.agent.eval.runner
+→ rag: Recall@5 = 0.7143，MRR = 0.4833（21 条）
+→ refusal: 4 / 4 全部正确拒答
+→ recommend: 1 条（按设计不计入引用率）
+```
+
+失败的 6 条全部是**语义理解类**问题（"杭州最喜欢哪类地点""去年夏天去了哪儿""上海看了什么夜景"）。
+这不是 bug，而是离线占位模式的已知边界：哈希向量只认字面重合，理解不了"去年夏天 = 2025 年 7~8 月"这类映射。
+换成真实 embedding（bge-m3 / text-embedding-v3）后这类题目会明显改善——**这也正好说明了为什么要先建评测集**：
+没有数字，你就分不清"管道坏了"和"模型能力不够"。
+
+### 10.4 阶段 0 出口条件达成情况
+
+| 出口条件 | 状态 | 证据 |
+| --- | --- | --- |
+| 数据库连通、三扩展创建 | ✅ | `CREATE EXTENSION` × 3 成功，容器 healthy |
+| 迁移成功、8 张表建好 | ✅ | `Running upgrade -> 0001` |
+| 语料入索引 | ✅ | 27 条记录 → 27 个 chunk |
+| CLI 能问答 | ✅ | 出现交互提示符并能返回答案 |
+| 事实回答带引用 | ✅ | 答案含 `[1][2]`，并列出证据与相似度 |
+| 无证据明确拒答 | ✅ | 拒答类 4/4 正确 |
+| 评测能出 Recall@5 / MRR | ✅ | 0.7143 / 0.4833 |
+| trace 可回溯 | ✅ | 每次问答在 `backend/data/traces/*.jsonl` 留下完整 step |
+
+**结论：阶段 0 出口条件全部达成**，可以进入阶段 1。
+
+### 10.5 因此永久修改了什么
+
+1. `backend/docker/db/Dockerfile` → 换 `pgvector/pgvector:pg16` + `postgresql-16-postgis-3`，并写清原因。
+2. `backend/alembic.ini` → 改为纯 ASCII，从根上消除 GBK 解码问题。
+3. `docker-compose.yml` → 保持 `build: ./backend/docker/db`，加 BOM 警告注释。
+4. `app/db/checks.py` → 向量模型不一致时，额外提示"离线模式该改哪三个变量"。
+5. `app/cli.py` → 占位模式下若阈值过高会主动提醒；`Ctrl+C` 退出不再抛 `CancelledError` 噪音。
+6. `.env.example` / `README.md` / 本文档 → 补充离线模式配置、Windows 无 make 的替代命令表。
+
+---
+
+## 11. 动手练习（验证你是否真的理解）
 
 1. 把 `RETRIEVAL_MIN_SCORE` 从 0.30 改成 0.60，重跑 `make eval`，观察拒答变多、Recall 如何变化。
 2. 在 `data/demo_corpus.jsonl` 里加一条自己的"假行程"，重新 `make seed-demo`，问一个只有它能回答的问题，看引用是否指向它。
@@ -409,7 +499,7 @@ make cli           # 交互式问答
 
 ---
 
-## 11. 下一阶段
+## 12. 下一阶段
 
 阶段 1：离线批处理 + 照片元数据（W1-1 jobs 框架 / W1-2 caption + ai_tags / W1-3 索引任务）。
 核心变化：索引不再是手跑脚本，而是**可断点续跑、幂等、带任务状态**的批处理；并开始真正接触照片的 EXIF 与缩略图（仍然遵守"原图永不上云"）。

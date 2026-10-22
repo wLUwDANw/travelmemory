@@ -7,9 +7,8 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
+from fakes import InMemoryVectorSearch, load_demo_corpus
 
 from app.agent.observability import Trace
 from app.agent.pipeline import AgentPipeline
@@ -18,39 +17,13 @@ from app.agent.state import PipelineState
 from app.core.config import get_settings
 from app.core.embedding import build_embedder
 from app.core.llm import build_llm
-from app.schemas.document import DocumentRef, SearchHit
 from app.utils.citation import citation_rate
-from fakes import InMemoryVectorSearch
-
-CORPUS_FILES = ("demo_corpus.jsonl", "demo_places.jsonl")
 
 
 @pytest.fixture
 async def store(user_id) -> InMemoryVectorSearch:
     """把演示语料向量化塞进内存检索器（替代 pgvector）。"""
-    settings = get_settings()
-    embedder = build_embedder(settings)
-    search = InMemoryVectorSearch()
-
-    for name in CORPUS_FILES:
-        path = settings.backend_dir / "data" / name
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            record = json.loads(line)
-            content = record["content"]
-            hit = SearchHit(
-                ref=DocumentRef(
-                    source_type=record["source_type"],
-                    source_id=str(record["source_id"]),
-                    chunk_index=0,
-                ),
-                content=content,
-                metadata=record.get("metadata") or {},
-                score=1.0,
-            )
-            await search.add(user_id, hit, await embedder.embed_one(content))
-    return search
+    return await load_demo_corpus(user_id, build_embedder(get_settings()))
 
 
 def _build_pipeline(search: InMemoryVectorSearch, *, min_score: float) -> AgentPipeline:
@@ -117,7 +90,9 @@ async def test_pipeline_refuses_when_no_evidence(store, user_id):
 async def test_trace_records_every_step(store, user_id):
     settings = get_settings()
     pipeline = _build_pipeline(store, min_score=0.05)
-    trace = Trace(session=None, user_id=user_id, session_id="test", query="我去过哪些爬山看云海的地方？")
+    trace = Trace(
+        session=None, user_id=user_id, session_id="test", query="我去过哪些爬山看云海的地方？"
+    )
 
     await pipeline.run(
         user_id=user_id,
@@ -127,7 +102,14 @@ async def test_trace_records_every_step(store, user_id):
     )
 
     step_types = [step["step_type"] for step in trace.steps]
-    for expected in ("rewrite", "query_parse", "retrieve", "build_context", "generate", "self_check"):
+    for expected in (
+        "rewrite",
+        "query_parse",
+        "retrieve",
+        "build_context",
+        "generate",
+        "self_check",
+    ):
         assert expected in step_types, f"trace 缺少环节 {expected}"
 
     # JSONL 必须真的写出来了（可通过 make cli 之后 grep trace 目录验证）

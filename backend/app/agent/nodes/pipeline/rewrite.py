@@ -6,7 +6,12 @@
 
 from __future__ import annotations
 
-from app.agent.nodes.pipeline.common import clean_llm_text, format_history, strip_prefix_label, today_text
+from app.agent.nodes.pipeline.common import (
+    clean_llm_text,
+    format_history,
+    strip_prefix_label,
+    today_text,
+)
 from app.agent.observability import Trace
 from app.agent.prompts.loader import render
 from app.agent.state import PipelineState

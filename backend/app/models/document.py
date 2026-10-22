@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
-from pgvector.sqlalchemy import Vector
 
 from app.core.config import get_settings
 from app.models.base import Base, CreatedAt, PrimaryKey, UpdatedAt
@@ -27,8 +27,14 @@ _EMBEDDING_DIM = get_settings().embedding_dim
 class Document(Base):
     __tablename__ = "document"
     __table_args__ = (
+        # 唯一键必须带上 user_id：否则两个用户同一天的日文档 day/2025-10-03#0
+        # 会撞在同一行上互相覆盖（见迁移 0003 的说明）
         UniqueConstraint(
-            "source_type", "source_id", "chunk_index", name="uq_document_source_chunk"
+            "user_id",
+            "source_type",
+            "source_id",
+            "chunk_index",
+            name="uq_document_user_source_chunk",
         ),
     )
 

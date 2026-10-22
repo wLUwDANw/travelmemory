@@ -1,53 +1,54 @@
-"""测试替身：内存向量检索。
+"""测试替身：语料装载 + 内存检索的 re-export。
 
-用途：让「Agent 管道」的测试不需要 Docker / PostgreSQL 就能跑通（这正是 `VectorSearchPort` 抽象的意义）。
-与 pgvector 真实行为的对齐由 `tests/test_document_service.py` 负责（该用例需要真实数据库）。
+`InMemoryVectorSearch` 的实现已经搬到 `app/agent/rag/inmemory.py`
+（原因见那里的模块文档：评测器与 CLI 的离线模式也要用它）。
+这里保留 re-export，既有用例的 `from fakes import InMemoryVectorSearch` 不受影响。
+
+留在本文件的只有 `load_demo_corpus` —— 它依赖 `get_settings()` 等测试夹具，
+放在测试侧更合适。
 """
 
 from __future__ import annotations
 
-import math
+import json
 import uuid
-from typing import Sequence
 
-from app.schemas.document import SearchHit
+from app.agent.rag.inmemory import (  # noqa: F401 - 兼容既有用例的 `from fakes import ...`
+    CORPUS_FILES,
+    InMemoryVectorSearch,
+)
+from app.core.config import get_settings
+from app.schemas.document import DocumentRef, SearchHit
 
 
-class InMemoryVectorSearch:
-    """用余弦相似度在内存里做精确检索（等价于 pgvector 的 <=>）。"""
+async def load_demo_corpus(
+    user_id: uuid.UUID,
+    embedder,
+    target: InMemoryVectorSearch | None = None,
+) -> InMemoryVectorSearch:
+    """把演示语料向量化塞进内存检索器（替代 pgvector）。
 
-    def __init__(self) -> None:
-        #: (user_id, SearchHit, vector)
-        self.rows: list[tuple[uuid.UUID, SearchHit, list[float]]] = []
-
-    async def add(self, user_id: uuid.UUID, hit: SearchHit, vector: Sequence[float]) -> None:
-        self.rows.append((user_id, hit, list(vector)))
-
-    async def similar_search(
-        self,
-        user_id: uuid.UUID,
-        query_vector: Sequence[float],
-        *,
-        top_k: int = 8,
-        source_types: list[str] | None = None,
-    ) -> list[SearchHit]:
-        scored: list[tuple[float, SearchHit]] = []
-        for row_user, hit, vector in self.rows:
-            if row_user != user_id:
+    放在 `fakes.py` 而不是某个测试文件里，是为了让多个测试共用同一份装载逻辑：
+    语料装载一旦被改坏，所有端到端用例一起红，而不是"有的红有的不红"。
+    """
+    store = target or InMemoryVectorSearch()
+    settings = get_settings()
+    for name in CORPUS_FILES:
+        path = settings.backend_dir / "data" / name
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
                 continue
-            if source_types and hit.ref.source_type not in source_types:
-                continue
-            scored.append((_cosine(query_vector, vector), hit))
-
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        return [SearchHit(**{**hit.model_dump(), "score": round(score, 6)}) for score, hit in scored[:top_k]]
-
-
-def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
-    """余弦相似度（向量已归一化时等价于点积，这里仍按通用公式算）。"""
-    dot = sum(a * b for a, b in zip(left, right))
-    norm_l = math.sqrt(sum(a * a for a in left))
-    norm_r = math.sqrt(sum(b * b for b in right))
-    if norm_l == 0 or norm_r == 0:
-        return 0.0
-    return dot / (norm_l * norm_r)
+            record = json.loads(line)
+            content = record["content"]
+            hit = SearchHit(
+                ref=DocumentRef(
+                    source_type=record["source_type"],
+                    source_id=str(record["source_id"]),
+                    chunk_index=0,
+                ),
+                content=content,
+                metadata=record.get("metadata") or {},
+                score=1.0,
+            )
+            await store.add(user_id, hit, await embedder.embed_one(content))
+    return store

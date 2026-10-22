@@ -4,7 +4,7 @@
 
 完整设计见 **[旅忆地图 TravelMemory.md](./旅忆地图 TravelMemory.md)**，本文档只讲如何跑起来。
 项目约定见 [PROJECT.md](./PROJECT.md)，历史文档见 [docs/archive/](./docs/archive/)。
-**阶段复盘与原理讲解见 [docs/stages/](./docs/stages/)**（每完成一个阶段新增一份，阶段 0 已完成）。
+**阶段复盘与原理讲解见 [docs/stages/](./docs/stages/)**（每完成一个阶段新增一份，阶段 0~3 已完成）。
 
 ---
 
@@ -21,7 +21,10 @@ make cli                      # 阶段 0：纯文本 RAG 问答
 ```
 
 > 未配置 API Key 时会自动降级为**离线占位模式**（本地规则作答 + 本地哈希向量），
-> 此时只能验证链路是否通畅，回答质量不代表真实效果。
+> 此时只能验证链路是否通畅，回答质量不代表真实效果（且需把 `RETRIEVAL_MIN_SCORE` 调低，见下文）。
+>
+> Windows 用户请先读 [Windows 环境注意事项](#windows-环境注意事项实测于-windows-11-家庭版--powershell)
+> （没有 `make` 的替代命令、镜像方案、alembic 编码坑）。
 
 **阶段 0 验证清单**（三个出口条件逐条对应）：
 
@@ -34,6 +37,83 @@ make cli                      # 阶段 0：纯文本 RAG 问答
 | 生成指标 | `python -m app.agent.eval.runner --full` | 引用率 1.00、拒答正确 1.00 |
 | 归因对比 | `make eval-compare` | 按 prompt_version / embedding_model 输出对比表 |
 | 单元测试 | `make test` | 通过（依赖数据库的用例在无 Docker 时自动跳过） |
+
+**阶段 1 已在阶段 0 之上跑通**（照片 → caption → 日文档），验证命令：
+
+```bash
+make seed-photos                      # 合成演示照片（仅元数据，无图片文件）
+cd backend && python -m app.jobs.caption_job --limit 200
+cd backend && python -m app.jobs.index_job --limit 500
+cd backend && python -m app.jobs.caption_job --limit 200   # ★ 第二次应显示"执行 0 条"
+```
+
+原理讲解见 [docs/stages/stage1-offline-jobs.md](./docs/stages/stage1-offline-jobs.md)。
+
+**阶段 2 已在阶段 1 之上跑通**（中文时间解析 + 结构化过滤 + 混合检索 + SSE 流式问答页）：
+
+```bash
+make eval-time             # W2-1：中文时间表达解析准确率（不需要数据库）
+make migrate               # 建阶段 2 的 GIN / pg_trgm 索引
+make index-batch           # 重建日文档，写入 bbox（min/max 经纬度）
+make eval-ablation         # W2-2 出口条件：混合检索 Recall@5 不低于纯向量
+
+make web-install           # 首次：装前端依赖
+make dev & make web-dev    # 后端 8000 + 前端 5173，浏览器打开 http://localhost:5173
+```
+
+原理讲解见 [docs/stages/stage2-structured-retrieval.md](./docs/stages/stage2-structured-retrieval.md)。
+
+**阶段 3 已在真实库上验收通过**（工具调用 + Reranker + 缓存）：
+
+```bash
+docker compose --profile stage3 up -d   # 阶段 3 起需要 Redis
+make migrate                            # 0005：HNSW 索引
+make eval-tools                         # W3-1 出口：工具选择准确率 ≥ 0.9（离线可跑）
+make eval-ablation                      # W3-4 出口： Recall@5 不下降
+make cache-stats                        # W3-3 出口：POI/路线缓存命中率 ≥ 0.6
+```
+
+真实数值（k=5，26 条用例）：纯向量 Recall@5 **0.619** → +结构化过滤 **0.809** → +词面混合 **0.762**；
+工具选择准确率 **22/22 = 1.0000**；`pytest` **204 passed**。
+
+原理讲解见 [docs/stages/stage3-tools-rerank.md](./docs/stages/stage3-tools-rerank.md)。
+
+**阶段 4 已完成**（三层记忆 + LangGraph + 融合策略对比）：
+
+```bash
+make migrate                            # 0006：memory_item / memory_source
+AGENT_RUNTIME=graph make dev            # 切到图运行时（默认 pipeline，可回滚）
+python -m app.agent.eval.runner --ablation   # 四档消融 + 出口条件自动判定
+```
+
+真实大模型下的消融（qwen3.7-plus + text-embedding-flash，k=5，26 条）：
+
+| 档位 | Recall@5 | MRR |
+| --- | --- | --- |
+| 纯向量 | 0.833 | 0.718 |
+| +结构化过滤 | 0.857 | 0.722 |
+| **+词面召回（weighted，默认）** | **0.857** | **0.778** |
+| +RRF 融合 | 0.833 | 0.679 |
+
+**结论：真实语义向量下 RRF 不敌 weighted，MRR 掉 0.1** —— 词面覆盖率只有 1.0/0.5/0.0 三档，
+RRF 的"只看排名"会放大这种离散噪声。默认保持 `RETRIEVAL_FUSION=weighted`；
+RRF 已实现加权 + 分档排名，留待三路（+记忆）时再用数据决定是否切换。
+
+原理讲解见 [docs/stages/stage4-memory-graph.md](./docs/stages/stage4-memory-graph.md)。
+
+**阶段 5 第一段已完成**（W5-1 评测扩充 + W5-2 归因对比；W5-3 可观测看板待下一段）：
+
+```bash
+python -m app.agent.eval.runner --full --limit 5          # 小样本全量（EVAL_LLM_JUDGE=true 时附忠实度）
+python -m app.agent.eval.runner --compare                 # prompt_version + embedding_model 归因对比表（含环比 ↑/↓）
+```
+
+评测集 26 → 28 条（22 rag + 4 refusal + 1 recommend + 1 plan）；拒答口径收口为
+`metrics.py` 纯函数（拒答不双扣：引用率/忠实度记 None，拒答正确性单独判）；
+`--compare` 聚合改为 Python 纯函数（P95 最近秩），`pytest` **319 passed / 10 skipped**
+（跳过项均为需要真实 PostgreSQL 的用例）。
+
+原理讲解见 [docs/stages/stage5-eval-observability.md](./docs/stages/stage5-eval-observability.md)。
 
 按阶段启用更多服务：
 
@@ -65,7 +145,7 @@ docker compose --profile stage3 --profile stage6 up -d   # + MinIO（阶段 6 �
 | **2** | 结构化 + 向量混合检索 | W2-1 Query 解析 / W2-2 时空过滤+全文 / W2-3 SSE 流式 |
 | **3** | 工具调用 + Reranker + 缓存 | W3-1 tools 框架 / W3-2 地图工具 / W3-3 Redis / W3-4 Reranker+HNSW |
 | **4** | Memory + LangGraph | W4-1 三层记忆 / W4-2 LangGraph 迁移 / W4-3 RRF+压缩 |
-| **5** | 评估与可观测 | W5-1 评测扩充 / W5-2 归因对比 / W5-3 看板 |
+| **5** | 评估与可观测 | W5-1 评测扩充 / W5-2 归因对比 ✅ 第一段已完成；W5-3 看板待下一段 |
 | **6** | 地图相册 + 跨端 | W6-1 导入链路 / W6-2 地图与行程 / W6-3 Capacitor / W6-4 隐私分享 / W6-5 降级测试 |
 | **7** | 扩展方向（可选，独立分支） | W7-1 语义与隐私 / W7-2 模式挖掘与推荐 / W7-3 可验证断言 |
 
@@ -79,11 +159,97 @@ docker compose --profile stage3 --profile stage6 up -d   # + MinIO（阶段 6 �
 make test               # 全量测试
 make test-degradation   # ★ 断言扩展开关全关时主流程不受影响
 make eval               # 跑评测集
+make eval-time          # 中文时间表达解析准确率（不需要数据库）
+make eval-ablation      # 三档消融：纯向量 / +过滤 / +词面
 make eval-compare       # 按 prompt_version / embedding_model 输出对比表
 make reindex            # 换 embedding 模型后必须执行
 make resemantic         # 换语义标签字典后必须执行（阶段 7）
 make lint               # ruff + mypy
 ```
+
+---
+
+## Windows 环境注意事项（实测于 Windows 11 家庭版 + PowerShell）
+
+### 1. 没有 `make` 怎么办
+
+Windows PowerShell 默认不带 `make`。三选一，推荐第一种：
+
+```powershell
+winget install GnuWin32.Make     # 装完重开终端即可用 make
+# 或者：用 Git Bash / WSL 执行 make
+# 或者：直接照下表手动执行等价命令（所有命令都在项目根目录执行）
+```
+
+| Makefile 目标 | 等价的原始命令（PowerShell） |
+| --- | --- |
+| `make up` | `docker compose up -d --build` |
+| `make migrate` | `cd backend; alembic upgrade head; cd ..` |
+| `make check` | `cd backend; python -m app.cli --check; cd ..` |
+| `make seed-demo` | `cd backend; python -m app.scripts.seed_demo; cd ..` |
+| `make cli` | `cd backend; python -m app.cli; cd ..` |
+| `make test` | `cd backend; python -m pytest; cd ..`（**必须带 `python -m`**，否则报 `No module named 'app'`） |
+| `make eval-tools` | `cd backend; python -m app.agent.eval.runner --tools; cd ..` |
+| `make cache-stats` | `cd backend; python -m app.scripts.cache_stats; cd ..` |
+| `make eval` | `cd backend; python -m app.agent.eval.runner; cd ..` |
+| `make eval-time` | `cd backend; python -m app.agent.eval.runner --time; cd ..` |
+| `make eval-ablation` | `cd backend; python -m app.agent.eval.runner --ablation; cd ..` |
+| `make eval-compare` | `cd backend; python -m app.agent.eval.runner --compare; cd ..` |
+| `make web-dev` | `cd frontend; npm run dev; cd ..` |
+
+> 容器起来后建议先等 10~15 秒再跑迁移，等 healthcheck 变 `healthy`。
+
+### 2. Docker 镜像与加速器
+
+- 本项目**必须**用自建镜像（`docker-compose.yml` 里是 `build: ./backend/docker/db`），
+  基础镜像为 `pgvector/pgvector:pg16` + apt 装 `postgresql-16-postgis-3`。
+  原因见 [`backend/docker/db/Dockerfile`](./backend/docker/db/Dockerfile) 里的注释：
+  原方案 `postgis/postgis:16-3.4`（Debian 11）的 PostgreSQL 官方源已 404，装不上 pgvector。
+- **所有 YAML 必须存为「UTF-8 无 BOM」**，带 BOM 时 Docker 报 `invalid trailing UTF-8 octet`。
+- 加速器不稳定时可多备几个，在 Docker Desktop → Docker Engine 配置里替换 `registry-mirrors`：
+  `https://docker.1ms.run`、`https://docker.m.daocloud.io`、`https://hub.rat.dev` 等（会偶发 403/限流）。
+
+### 3. Alembic 的编码坑（已在本仓库修复）
+
+Alembic 用 `encoding="locale"` 读 `alembic.ini`，中文 Windows 的 locale 是 GBK，
+文件里只要有 UTF-8 中文就会报 `UnicodeDecodeError: 'gbk' codec ...`。
+
+**仓库里的 `backend/alembic.ini` 已改为纯 ASCII 注释**，不要再往里面加中文；
+若你本地已经被转成了 GBK，直接把该文件覆盖回 UTF-8 版本即可。
+
+### 4. 离线占位模式（没配 API Key）必须调阈值
+
+哈希向量的余弦相似度普遍只有 0.05~0.13，沿用真实模型的 `RETRIEVAL_MIN_SCORE=0.30`
+会把证据全过滤掉，表现为**所有问题都拒答**。离线模式请在 `.env` 里改成：
+
+```
+EMBEDDING_PROVIDER=hashing
+EMBEDDING_MODEL=hashing
+EMBEDDING_MODEL_VERSION=hashing-1024@v1
+RETRIEVAL_MIN_SCORE=0.05
+```
+
+（CLI 启动时会检测到这种组合并主动提醒。）
+
+### 5. 退出 CLI
+
+输入 `exit`（或 `quit` / `q`）退出。`Ctrl+C` 也能退，只是会多出 `CancelledError`
+之类的 asyncio 噪音——已在代码中捕获，不影响功能。
+
+### 6. 本地 MinIO 走 HTTP，不开 HTTPS
+
+本地开发用 **HTTP**（`http://localhost:9000`，Console 是 `http://localhost:9001`）；
+**生产部署时再启用 HTTPS**，届时需把正式证书挂载到容器的 `~/.minio/certs`。
+
+两个容易踩的点：
+
+- `docker-compose.yml` 的 MinIO 服务**不要**挂载证书目录、`MINIO_SERVER_URL` 保持 `http://`，
+  端口是 `9000:9000` 与 `9001:9001`（不是 HTTPS 端口）。
+- `.env` 里的 `MINIO_ENDPOINT` **必须显式写 `http://`**：不写协议时 `boto3` / `minio-py`
+  默认走 HTTPS，而本地是自签名证书，会直接报 SSL 验证失败。
+
+浏览器打开 `http://localhost:9001` 应当**直接进登录页**——如果弹出"您的连接不是私密连接"，
+说明某处仍指向 `https://`，按上面两条排查，不要靠手动点"高级 → 继续"绕过去。
 
 ---
 

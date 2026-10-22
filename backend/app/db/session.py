@@ -26,7 +26,7 @@ _settings: Settings = get_settings()
 engine: AsyncEngine = create_async_engine(
     _settings.database_url,
     echo=False,
-    pool_pre_ping=True,      # 断线自动重连，避免容器重启后第一条请求必失败
+    pool_pre_ping=True,  # 断线自动重连，避免容器重启后第一条请求必失败
     pool_size=5,
     max_overflow=5,
 )

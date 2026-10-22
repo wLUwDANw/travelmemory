@@ -41,7 +41,9 @@ def test_out_of_range_citation_is_violation():
 
 
 def test_refusal_without_citation_passes():
-    state = _state("抱歉，我在你的照片和行程记录里没有找到能支撑这个问题的证据。", refused=True, n_blocks=0)
+    state = _state(
+        "抱歉，我在你的照片和行程记录里没有找到能支撑这个问题的证据。", refused=True, n_blocks=0
+    )
     assert collect_violations(state) == []
 
 

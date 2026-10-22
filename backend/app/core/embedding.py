@@ -118,7 +118,9 @@ class OpenAICompatEmbedder(BaseEmbedder):
                         f"embedding 返回条数不符：期望 {len(batch)}，实际 {len(data)}"
                     )
                 # data 可能乱序，必须按 index 归位
-                ordered: dict[int, list[float]] = {item["index"]: item["embedding"] for item in data}
+                ordered: dict[int, list[float]] = {
+                    item["index"]: item["embedding"] for item in data
+                }
                 for i in range(len(batch)):
                     results.append(self._validate_dim(ordered[i]))
                 self.embedded_count += len(batch)
@@ -155,7 +157,7 @@ class HashingEmbedder(BaseEmbedder):
         chars = [c for c in text if not c.isspace()]
         feats: set[str] = set(chars)
         # 相邻二字：中文里近似词，效果好于单字
-        feats.update(a + b for a, b in zip(chars, chars[1:]))
+        feats.update(a + b for a, b in zip(chars, chars[1:], strict=False))
         feats.update(w.lower() for w in _WORD_RE.findall(text))
         return feats
 
