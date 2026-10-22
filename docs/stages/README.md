@@ -12,7 +12,7 @@
 | [stage2-structured-retrieval.md](./stage2-structured-retrieval.md) | 阶段 2：结构化 + 向量混合检索（W2-1 / W2-2 / W2-3） | ✅ 已完成（时间解析 22/22；消融 0.714→0.857；流式 7 条断言；真实库 eval-ablation 待跑） |
 | [stage3-tools-rerank.md](./stage3-tools-rerank.md) | 阶段 3：工具调用 + Reranker + 缓存（W3-1 ~ W3-4） | ✅ 已完成并在真实库验收（工具选择 22/22；真实消融 0.619→0.809→0.762；HNSW 迁移 0005 已建；pytest 204 passed / 0 skipped） |
 | [stage4-memory-graph.md](./stage4-memory-graph.md) | 阶段 4：Memory + LangGraph（W4-1 ~ W4-3） | ✅ 已完成并在真实库验收（迁移 0006 已建；真实消融：weighted 0.857/0.778 为最优，RRF 0.833/0.679 未达标故默认 weighted；`pytest` 305 passed）。**W4-3 出口条件按 §4.3 判定为"策略降级"而非"算法失败"** |
-| `stage5-eval-observability.md` | 阶段 5：评估与可观测增强（W5-1 ~ W5-3） | ✅ 第一段已完成并经 5.2 真实 API 修正（W5-1 评测扩充 + W5-2 归因对比：评测集 29 条含 2 plan；拒答口径收口；`--compare` 环比表；prompt 禁注脚规则 + `PROMPT_VERSION=pv2026.10-stage5.2`；W5-3 可观测看板待下一段） |
+| `stage5-eval-observability.md` | 阶段 5：评估与可观测增强（W5-1 ~ W5-3） | ✅ 第一段已完成并经 5.2/5.3 真实 API 修正（W5-1 评测扩充 + W5-2 归因对比：评测集 29 条含 2 plan；拒答口径收口；`--compare` 环比表；self_check 对 plan/recommend 豁免逐句引用（`utils/intent.py` 规则分类，与评测集标注一致性有测试钉死）；prompt 禁注脚/禁"有证据却说无法回答"，`PROMPT_VERSION=pv2026.10-stage5.3`；W5-3 可观测看板待下一段） |
 | `stage6-map-album.md` | 阶段 6：地图相册 + 跨端（W6-1 ~ W6-5） | 待开始 |
 | `stage7-research.md` | 阶段 7：扩展方向（可选，独立分支） | 待开始 |
 

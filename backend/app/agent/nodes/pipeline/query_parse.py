@@ -33,6 +33,7 @@ from app.agent.prompts.loader import render
 from app.agent.rag.time_parser import parse_time_range
 from app.agent.state import ParsedQuery, PipelineState
 from app.core.llm import BaseLLM, LLMMessage
+from app.utils.intent import classify_intent
 
 
 class QueryParseNode:
@@ -62,11 +63,15 @@ class QueryParseNode:
                     time_range=rule_range.to_dict() if rule_range else None,
                     time_source="rule" if rule_range else "none",
                     time_label=rule_range.label if rule_range else "",
+                    # 意图走规则分类，不依赖 LLM：降级时也必须知道这是不是规划题，
+                    # 否则 self_check 会拿事实题的口径去杀它（阶段 5.3 真实事故）
+                    intent=classify_intent(state.query),
                 )
                 step.output = {
                     "degraded": True,
                     "reason": "json parse failed",
                     "time_source": state.parsed.time_source,
+                    "intent": state.parsed.intent,
                 }
                 return
 
@@ -87,6 +92,7 @@ class QueryParseNode:
                 degraded=False,
                 time_source=time_source,
                 time_label=rule_range.label if rule_range else "",
+                intent=classify_intent(state.query),
             )
             step.output = {
                 "keywords": state.parsed.keywords,
@@ -94,6 +100,7 @@ class QueryParseNode:
                 "themes": state.parsed.themes,
                 "time_range": state.parsed.time_range,
                 "time_source": time_source,
+                "intent": state.parsed.intent,
                 "tokens": result.total_tokens,
             }
 

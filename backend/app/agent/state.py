@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from app.schemas.document import DocumentRef, SearchHit
 from app.schemas.memory import MemoryContext
+from app.utils.intent import INTENT_FACT
 
 
 @dataclass
@@ -35,6 +36,11 @@ class ParsedQuery:
     time_source: str = "none"
     #: 命中的时间表达原文（如"去年秋天"），写进 trace 便于回溯
     time_label: str = ""
+    #: 查询意图（阶段 5.3）：fact（事实问答，默认）/ plan（行程规划）/ recommend（推荐）。
+    #: plan/recommend 豁免 self_check 的逐句引用校验 —— 它们不是事实题，
+    #: 拿"每句带 [n]"去量它们是错口径（阶段 5.2/5.3 连续两次真实事故）。
+    #: 由 QueryParseNode 用规则分类器填写，定义见 `app/utils/intent.py`。
+    intent: str = INTENT_FACT
 
 
 @dataclass

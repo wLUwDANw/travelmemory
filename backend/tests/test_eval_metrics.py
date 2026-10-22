@@ -192,6 +192,18 @@ async def test_full_eval_refused_answer_not_judged():
     assert rows[0].refused is True
 
 
+async def test_full_eval_judge_skips_unscored_kinds():
+    """plan/recommend 不送 judge：建议句没有"证据支撑"可言，评了只会得到虚假 0 分。"""
+    pipeline = _FakePipeline(
+        Settings.model_construct(eval_llm_judge=True), _FakeLLM("1"), _make_state()
+    )
+    item = _make_item()
+    item.kind = "plan"
+    rows = await run_full_eval(pipeline, [item], user_id=uuid.uuid4())
+    assert rows[0].faithfulness is None
+    assert rows[0].citation_rate is None, "plan 的引用率口径同样不计入"
+
+
 # ---------------------------------------------------------------- 评测集契约
 def test_dataset_contract():
     """评测集构成契约：22 rag + 4 refusal + 1 recommend + 2 plan（阶段 5.2 起）。"""

@@ -65,6 +65,7 @@ from app.db.session import SessionFactory, dispose_engine, ping_database
 from app.models.eval import EvalCase, EvalResult
 from app.schemas.document import DocumentRef, SearchHit
 from app.services.user_service import get_or_create_demo_user
+from app.utils.intent import UNSCORED_INTENTS
 
 logger = get_logger(__name__)
 
@@ -228,7 +229,11 @@ async def run_full_eval(
 
         faithfulness = (
             None
-            if state.refused or not pipeline.settings.eval_llm_judge
+            if state.refused
+            or not pipeline.settings.eval_llm_judge
+            # plan/recommend 与引用率同理：只要求"生成合理"，
+            # 拿"每句话有没有证据支撑"去量建议句，只会得到一片虚假的 0 分
+            or item.kind in UNSCORED_INTENTS
             else await judge_faithfulness(pipeline, state)
         )
         rows.append(

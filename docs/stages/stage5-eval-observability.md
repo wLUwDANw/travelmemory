@@ -79,6 +79,28 @@ recommend/plan： 恒为 None
 （数据集 `note` 里写的"只计 hit@3"也要等阶段 7）。没有尺子的时候就**留白** ——
 错记一个 0.0 比不记更糟：它会让人以为"拒答率下降了"，从而去改一个本来没问题的模块。
 
+阶段 5.3 补上了这个故事的下半集：**光豁免指标不够，运行时也得豁免**。
+
+5.2 只把统计口径改对了，`SelfCheckNode` 内部仍按事实题的标准检查每一句话 ——
+于是 plan 题给出"建议寻找拥有历史遗迹和老城区美食的城市"这样合理的规划建议时，
+因为句句没有 `[n]`，照样被判"缺少引用" → 重试 → 拒答。
+**指标说"这条不计引用率"，self_check 说"杀了"**，两层认的不是同一套口径。
+
+修法分三块（核心是 `app/utils/intent.py`）：
+
+1. 意图分类走**确定性规则**（关键词命中），不用 LLM —— 评测集标好的 kind 必须与
+   运行时判定一致，"这次算下次不算"的豁免比没有豁免更危险
+2. `QueryParseNode` 把意图写进 `ParsedQuery.intent`（fact / plan / recommend）。
+   两条运行时（pipeline 与 graph）共用同一个节点，改动自动覆盖两者
+3. `SelfCheckNode` 对 plan/recommend **跳过逐句引用校验，但保留编号越界校验** ——
+   豁免的是"要不要引用"，不是"引用能不能瞎编"
+
+标记词表刻意不收"行程"："哪趟行程是以看石窟和古城为主的？"问的是过去哪一趟，
+是事实题；收了"行程"就会误放一条 rag 过关，指标被反向污染。
+`tests/test_intent.py::test_classifier_agrees_with_eval_dataset` 钉死
+"分类器判定 == 数据集标注"——将来加了没有标记词的 plan 题，测试会直接红，
+而不是等真实 API 验证时才发现又被误杀。
+
 ### 2.2 LLM-as-a-Judge 为什么默认关闭
 
 忠实度（faithfulness）= 让模型再当一回考官，读一遍证据和回答，
@@ -178,7 +200,7 @@ ORM → 纯数据的搬运留在 `runner.py` 的 `print_compare` 里，就几行
 | 函数 | 管什么 |
 | --- | --- |
 | `refusal_correct(kind, refused)` | 拒答口径（见 2.1） |
-| `citation_rate_for(kind, answer, refused=)` | 引用率口径：拒答 / recommend / plan 记 None，其余真算 |
+| `citation_rate_for(kind, answer, refused=)` | 引用率口径：拒答 / recommend / plan 记 None，其余真算（豁免名单与 self_check 共用，见 `app/utils/intent.py`） |
 | `parse_faithfulness(raw)` | judge 输出的严格解析 |
 
 `UNSCORED_CITATION_KINDS = frozenset({"recommend", "plan"})` 显式列出
@@ -218,9 +240,10 @@ ORM → 纯数据的搬运留在 `runner.py` 的 `print_compare` 里，就几行
 judge 默认关闭意味着大量行"未评"，存 0 会把"没评过"混进"评为幻觉"，
 忠实度均值直接失真。None 的语义是"未评"，聚合时跳过。
 
-`PROMPT_VERSION` 升到 `pv2026.10-stage5.1`（PROJECT.md §五：改 prompt 必须同步版本，
-否则归因对不上）。本段只新增了 `eval_faithfulness.md`（只影响 judge 调用），
-按约定仍整体递增。
+`PROMPT_VERSION` 随 prompt 改动递增：5.1（新增 judge prompt）→ **5.2**（system.md
+禁注脚规则）→ **5.3**（system.md 禁"有证据却说无法回答"类废话）。
+PROJECT.md §五：改 prompt 必须同步版本，否则归因表会把两次不同的行为混成一组，
+环比箭头也就失去意义。
 
 ### 3.5 评测集扩容（`backend/data/eval_cases.jsonl`）
 
@@ -240,14 +263,20 @@ judge 默认关闭意味着大量行"未评"，存 0 会把"没评过"混进"评
 | 文件 | 作用 | 对应知识点 |
 | --- | --- | --- |
 | `app/agent/eval/metrics.py` | 指标口径收口：`refusal_correct` / `citation_rate_for` / `parse_faithfulness` | 指标设计、口径分层 |
+| `app/utils/intent.py`（新，5.3） | 意图分类 + 豁免名单（`UNSCORED_INTENTS`），self_check 与 eval 共用 | 分层红线（nodes 不能 import agent.eval）、确定性规则 |
+| `app/agent/state.py` + `nodes/pipeline/query_parse.py` | `ParsedQuery.intent` 字段与规则分类填写（降级时也填） | 双运行时共享节点 |
+| `app/agent/nodes/pipeline/self_check.py` | plan/recommend 豁免逐句引用（编号越界照查） | 红线与豁免的边界 |
+| `app/agent/prompts/system.md` | 铁律 6/7：禁注脚与免责声明、禁"有证据却说无法回答" | prompt 工程 |
 | `app/agent/eval/compare.py`（新） | 归因对比纯函数：分组 / P95 / 箭头 / Markdown 渲染 | 分位数、环比、可测性 |
-| `app/agent/eval/runner.py` | judge 接线、口径换纯函数、`--compare` 重写 | 评测执行、LLM-as-a-Judge |
+| `app/agent/eval/runner.py` | judge 接线（plan/recommend 不送）、口径换纯函数、`--compare` 重写 | 评测执行、LLM-as-a-Judge |
 | `app/agent/prompts/eval_faithfulness.md`（新） | judge prompt（`{{var}}` 占位，版本化） | prompt 管理 |
-| `app/agent/prompts/loader.py` | `PROMPT_VERSION` → `pv2026.10-stage5.1` | 版本归因 |
+| `app/agent/prompts/loader.py` | `PROMPT_VERSION` → `pv2026.10-stage5.3` | 版本归因 |
 | `app/core/config.py` | `eval_llm_judge` 开关（默认关） | feature flag、成本控制 |
 | `app/models/eval.py` + `alembic/versions/0007_*.py` | `faithfulness` 列 + 迁移 | schema 演进、可空列语义 |
 | `data/eval_cases.jsonl` | 26 → 29 行（+1 rag +1 plan；1 条 rag 改判 plan） | 评测集构成 |
 | `tests/test_eval_metrics.py`（新） | 口径 + judge 接线 + 数据集契约（替身，不烧 token） | Mock、回归防护 |
+| `tests/test_intent.py`（新，5.3） | 分类器行为（含"行程"反例）+ 与数据集标注一致 | 启发式的兜底测试 |
+| `tests/test_self_check.py` | 意图豁免：跳过引用校验但越界照查、fact 不受影响 | 豁免边界回归 |
 | `tests/test_eval_compare.py`（新） | 分组 / P95 / 箭头 / 排序 / 渲染全纯数据 | 不依赖 DB 的单测 |
 | `.env.example` | `EVAL_LLM_JUDGE=false` 示例条目 | 配置即文档 |
 
@@ -259,8 +288,8 @@ judge 默认关闭意味着大量行"未评"，存 0 会把"没评过"混进"评
 cd backend
 
 # ① 离线口径测试（不连库、不烧 token）——第一道门
-python -m pytest tests/test_eval_metrics.py tests/test_eval_compare.py -q
-# 期望：25 passed
+python -m pytest tests/test_eval_metrics.py tests/test_eval_compare.py tests/test_intent.py tests/test_self_check.py -q
+# 期望：45 passed（口径 25 + 意图分类 8 + self_check 豁免 12）
 
 # ② 小样本全量（含 judge 演示；mock 下 judge 也会走替身链路）
 EVAL_LLM_JUDGE=true python -m app.agent.eval.runner --full --limit 5
@@ -315,6 +344,12 @@ python -m ruff format app tests && python -m ruff check . && python -m mypy app 
    更致命 —— 指标会把"标错的题"记成"系统的错"，把人引向错误的方向。
    `test_dataset_contract` 现在专门断言"含'规划/推荐/该去哪'的问题不许是 rag"，
    且 `refusal_correct` 对 recommend/plan 恒为 None（`test_refusal_correct_unscored_kinds_always_none` 钉死）。
+8. **豁免必须两层一起改**（阶段 5.3 真实事故）：5.2 只把指标口径改成
+   "plan/recommend 不计引用率"，`SelfCheckNode` 却仍按事实题检查 ——
+   指标说不杀、运行时照杀，plan 题继续被误杀。**改口径时要问一句"还有谁在执行这个口径"**：
+   这次是 self_check，下次可能是 API 层的某个校验。豁免名单因此抽到
+   `app/utils/intent.py` 由两层共用（nodes 不能 import agent.eval，分层红线，
+   `tests/test_layering.py` 守着这条）。
 
 ---
 

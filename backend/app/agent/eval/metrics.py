@@ -21,6 +21,11 @@ from dataclasses import dataclass
 
 from app.utils.citation import citation_rate as _citation_rate
 
+#: 数据集 kind 与运行时 intent 共用同一份豁免名单（plan / recommend）——
+#: 指标层与 self_check 必须认同一套词，否则会出现"指标说不计引用率、
+#: self_check 却按事实题校验"的错位（阶段 5.3 真实事故）。
+from app.utils.intent import UNSCORED_INTENTS
+
 #: 拒答识别：命中这些标记即认为模型明确拒答了
 REFUSAL_MARKERS = (
     "没有找到能支撑",
@@ -28,10 +33,6 @@ REFUSAL_MARKERS = (
     "没有找到相关",
     "无法回答这个问题",
 )
-
-#: 不计入**事实性指标**（citation_rate / refusal_correct）的 kind：
-#: 推荐/规划类只要求"生成合理"，用 RAG 的尺子量它们是错口径
-UNSCORED_KINDS = frozenset({"recommend", "plan"})
 
 
 @dataclass
@@ -104,7 +105,7 @@ def refusal_correct(kind: str, refused: bool) -> float | None:
     """
     if kind == "refusal":
         return 1.0 if refused else 0.0
-    if kind in UNSCORED_KINDS:
+    if kind in UNSCORED_INTENTS:
         return None
     return 0.0 if refused else None
 
@@ -118,7 +119,7 @@ def citation_rate_for(kind: str, answer: str, *, refused: bool) -> float | None:
     - recommend / plan → None：群体先验与规划类不计引用率
     - 其余 → citation_rate(answer)
     """
-    if refused or kind in UNSCORED_KINDS:
+    if refused or kind in UNSCORED_INTENTS:
         return None
     return citation_rate(answer)
 

@@ -110,8 +110,10 @@ python -m app.agent.eval.runner --compare                 # prompt_version + emb
 
 评测集 29 条（22 rag + 4 refusal + 1 recommend + 2 plan；阶段 5.2 已把规划题从 rag 改判）；
 拒答口径收口为 `metrics.py` 纯函数（拒答不双扣：引用率/忠实度记 None，拒答正确性单独判；
-recommend/plan 两个事实性指标都不计入）；`--compare` 聚合改为 Python 纯函数（P95 最近秩），`pytest` **330 passed**
-（本机 PostgreSQL 在线，10 个 db 用例实跑通过；无库机器上为 320 passed / 10 skipped，
+recommend/plan 两个事实性指标都不计入）；`SelfCheckNode` 对 plan/recommend 同样豁免逐句引用
+校验（阶段 5.3，规则意图分类 `app/utils/intent.py`，编号越界照查）；
+`--compare` 聚合改为 Python 纯函数（P95 最近秩），`pytest` **345 passed**
+（本机 PostgreSQL 在线，10 个 db 用例实跑通过；无库机器上为 335 passed / 10 skipped，
 跳过项均为需要真实 PostgreSQL 的用例；测试进程由 conftest 的 autouse fixture 强制
 `LLM_PROVIDER=mock` + `EMBEDDING_PROVIDER=hashing`，不碰真实模型）。
 
