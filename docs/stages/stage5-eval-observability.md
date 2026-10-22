@@ -1,9 +1,11 @@
-# 阶段 5 第一段 · 评测扩充 + 归因对比（W5-1 / W5-2）
+# 阶段 5 · 评测扩充 + 归因对比 + 可观测看板（W5-1 / W5-2 / W5-3）
 
 > 这一阶段要解决什么：**让"改完 prompt 指标到底变好还是变坏"变成一张表能回答的问题**，
-> 并给生成质量补上第二个口径（忠实度）。出口条件见第 1 节。
+> 并给生成质量补上第二个口径（忠实度），最后把这张表变成一个谁都能打开看的可观测看板。
+> 出口条件见第 1 节。
 >
-> 本段只做 W5-1（评测扩充）与 W5-2（归因对比）；**W5-3（可观测看板）暂缓，下一段再做**。
+> 第一段做了 W5-1（评测扩充）与 W5-2（归因对比）；**第二段（本文 §2.6 / §3.6）收口 W5-3（可观测看板）**，
+> 并补修了 5.3 的真实事故（self_check 按意图豁免引用校验）。**阶段 5 至此全部完成。**
 
 设计文档依据：[`旅忆地图 TravelMemory.md`](../../旅忆地图%20TravelMemory.md) §4.5（评测集 schema）、
 §10.1（核心硬指标）、第十一章「阶段 5」。
@@ -14,15 +16,16 @@
 
 ```
 W5-1 评测扩充（口径收口 + judge + 数据集扩容）  ──┐
-                                                   ├──► W5-2 归因对比表
-（W5-3 可观测看板：暂缓，下一段）
+                                                   ├──► W5-2 归因对比表 ──► W5-3 可观测看板
 ```
 
 | 块 | 出口条件（验收标准） | 状态 |
 | --- | --- | --- |
 | W5-1 | 引用率 / 拒答口径收口为 `metrics.py` 纯函数；新增忠实度指标（默认关）；评测集 22 rag + 4 refusal + 1 recommend + 2 plan（阶段 5.2：规划题不再标 rag） | ✅ 已完成 |
 | W5-2 | `--compare` 按 prompt_version + embedding_model 分组输出 Markdown 归因表，含环比 ↑/↓ 与 P95；分组逻辑不依赖数据库、可单测 | ✅ 已完成 |
-| W5-3 | Run / Step / ToolCall 看板 | ⏸ 暂缓，下一段 |
+| W5-3 | `make dashboard` 导出单文件静态 HTML：汇总卡片（总用例数 / 平均 Recall / 平均引用率）+ 归因对比表（↑↓）+ 延迟 P50/P95 + 趋势图；聚合与渲染不依赖数据库、可单测；`pytest` 全绿 | ✅ 已完成 |
+
+**阶段 5 最终状态：W5-1 ✅ / W5-2 ✅ / W5-3 ✅（封板）**
 
 ---
 
@@ -188,6 +191,62 @@ ORM → 纯数据的搬运留在 `runner.py` 的 `print_compare` 里，就几行
 代价是万行以上的历史结果要在 Python 侧聚合 —— 真到那天再把均值搬进 SQL，
 接口不用变。
 
+### 2.6 W5-3：看板为什么是「单文件静态 HTML」而不是一个服务
+
+看板的使用场景是**明早开会时随手打开**，不是常驻巡检。所以选型上刻意保守：
+
+| 选项 | 为什么没选 / 选了 |
+| --- | --- |
+| Grafana + Prometheus | 要常驻服务、要埋点改造、要运维。阶段 5 的产出是"一次评测的结论"，不是实时曲线 |
+| FastAPI 新路由 | 打开看板前得先起后端，等于把"看一眼"变成"部署一次" |
+| **单文件静态 HTML（选它）** | 双击即开、能邮件转发、能塞进 Git；数据内联成 `window.DASHBOARD_DATA`，只有 Pico.css 与 ECharts 走 CDN |
+
+断网时页面仍然可读：卡片与表格是纯 HTML/内联 CSS，只有图表块会空着 ——
+**降级成"没图但有数"，而不是白屏**。
+
+### 2.7 顶部卡片为什么取「最新一组」而不是「全部历史平均」
+
+这是 W5-3 唯一一处真正的口径决策。跨版本求平均是错的：
+
+```
+pv2026.10-stage5.1  Recall = 0.80
+pv2026.10-stage5.2  Recall = 1.00
+────────────────────────────────
+"全部历史平均"      = 0.90   ← 这个数既不代表 5.1 也不代表 5.2
+```
+
+0.90 会被当成"系统当前的水平"，而系统当前其实是 1.00。
+所以卡片取**最新一组**，并在副标题写明这个数属于哪个版本。
+
+分工因此很清楚：**卡片回答"现在怎么样"，归因表回答"比上次好还是坏"**。
+卡片上的箭头直接复用 `CompareRow.deltas`（方向已由 `compare._arrows` 按指标语义判完），
+不再二次判断 —— 免得出现"表格说退步、卡片说进步"的两套口径。
+
+同理，"总用例数"显示的是**最新一组的 n**（= 一次评测的题目数），
+历史累计行数降级为副标题；否则"跑了几轮"会被混进"有多少道题"。
+
+### 2.8 P50 与 P95 为什么必须一起出现
+
+- **只看 P95**：一次 3 秒的冷启动会把整组"看起来很慢"，于是去优化一个一次性的抖动；
+- **只看 P50**：尾延迟从 200ms 涨到 2s 完全看不见，而那才是用户实际抱怨的东西。
+
+两者都沿用 `compare.percentile` 的**最近秩**口径（不插值），
+所以看板上的 P95 与 `--compare` 终端表里的 P95 是**同一个数** ——
+同一个出口不允许给出两个答案。看板还额外给出 `P95 / P50` 倍率，
+倍率突然变大 = 尾延迟在拖，即使 P50 没动。
+
+### 2.9 `--demo` 不是"演示功能"，是出口条件的一部分
+
+`make dashboard` 的出口条件是"看板能出"，而 CI / 没起 Docker 的机器上没有 PostgreSQL。
+没有 `--demo`，这条出口条件就长期处于**未验证**状态 ——
+和 `--ablation --offline`（阶段 4 W4-3）是同一个道理。
+
+`--demo` 只喂合成的 `ResultRecord`，走的是与真实路径**完全相同**的
+`build_dashboard_data` + `render_dashboard_html`，因此它验证的是"看板对不对"，
+而不是"演示数据好不好看"。页面标题会被强制改成
+「（DEMO · 合成样例数据，非真实指标）」—— **看板是用来做决策的**，
+一张看起来像真的、数字却是编的看板，比没有看板更危险。
+
 ---
 
 ## 3. 逐块讲解
@@ -256,6 +315,44 @@ PROJECT.md §五：改 prompt 必须同步版本，否则归因表会把两次�
 `test_eval_metrics.py::test_dataset_contract` 钉死这个构成，
 并专门断言"含'规划/推荐/该去哪'的问题不许是 rag"。
 
+### 3.6 W5-3 可观测看板（`app/agent/eval/dashboard.py` + `app/scripts/export_dashboard.py`）
+
+依旧是「纯函数 + 脏活分离」的两层结构，与 `compare.py` / `runner.py` 完全一致：
+
+| 层 | 文件 | 职责 |
+| --- | --- | --- |
+| 纯函数 | `app/agent/eval/dashboard.py` | `build_dashboard_data()` 聚合（复用 `build_compare_rows`，额外算 P50）、`render_dashboard_html()` 渲染。**不 import SQLAlchemy、不碰文件系统** |
+| 脏活 | `app/scripts/export_dashboard.py` | 读 `eval_result` → 搬成 `ResultRecord` → 调上面两个函数 → 写 HTML |
+
+聚合**复用** `build_compare_rows` 而不是另写一份分组逻辑：看板与终端表格
+不能有两套聚合口径，两套口径迟早给出两个答案。
+看板只多算一个 P50 —— 为此 `CompareRow` 新增 `p50_latency_ms` 字段
+（Markdown 表不渲染它，所以 `--compare` 的输出一字未变）。
+
+渲染用标准库 `string.Template`（**不引 jinja2**：这份模板只需要替换 5 个占位符，
+为一个 200 行的脚本加一个运行时依赖不划算）。
+模板里刻意不出现 `${}`（那是 JS 模板字面量，会和 `string.Template` 撞车），
+JS 全部用字符串拼接。
+
+**逃逸是硬要求**，因为分组名来自数据库 = 不可信输入：
+
+- HTML 文本 → `html.escape`；
+- 内嵌 JSON → `json.dumps(...).replace("<", "\\u003c")`。
+  少了这一步，`</script>` 出现在 `prompt_version` 里就能截断整个脚本块。
+
+`tests/test_eval_dashboard.py` 里 `test_untrusted_group_name_is_escaped` 钉死这两条。
+
+ECharts 数据里的 `None` 原样落成 `null`：ECharts 会自动断线，
+于是「上一轮没开 judge，忠实度不可比」显示成**缺口**，
+而不是被插值成一条假的平滑曲线 —— 和 §2.3「不可比就不给箭头」是同一个约定。
+
+`Makefile` 新增两个目标：
+
+```makefile
+dashboard:        # 读库导出 → backend/data/dashboard.html
+dashboard-demo:   # 合成样例 → backend/data/dashboard.demo.html（页面标题注明 DEMO）
+```
+
 ---
 
 ## 4. 文件清单
@@ -278,6 +375,12 @@ PROJECT.md §五：改 prompt 必须同步版本，否则归因表会把两次�
 | `tests/test_intent.py`（新，5.3） | 分类器行为（含"行程"反例）+ 与数据集标注一致 | 启发式的兜底测试 |
 | `tests/test_self_check.py` | 意图豁免：跳过引用校验但越界照查、fact 不受影响 | 豁免边界回归 |
 | `tests/test_eval_compare.py`（新） | 分组 / P95 / 箭头 / 排序 / 渲染全纯数据 | 不依赖 DB 的单测 |
+| `app/agent/eval/dashboard.py`（新，W5-3） | 看板纯函数层：聚合 + HTML 渲染（Pico.css / ECharts CDN，数据内联） | 可观测性、静态产物 |
+| `app/scripts/export_dashboard.py`（新，W5-3） | `make dashboard`：读 `eval_result` → 写 `data/dashboard.html`；`--demo` 合成样例 | 脚本入口、离线可验证 |
+| `app/agent/eval/compare.py` | 新增 `CompareRow.p50_latency_ms`（Markdown 表不受影响） | 口径复用，避免两套聚合 |
+| `Makefile` | `dashboard` / `dashboard-demo` 两个目标 | 出口条件入口 |
+| `tests/test_eval_dashboard.py`（新） | 聚合口径 / 渲染契约 / 内嵌 JSON 可解析 / XSS 逃逸 | 不依赖 DB 的单测 |
+| `backend/data/dashboard.html` | 真实数据看板产物（`make dashboard` 覆盖写） | 交付物 |
 | `.env.example` | `EVAL_LLM_JUDGE=false` 示例条目 | 配置即文档 |
 
 ---
@@ -288,8 +391,10 @@ PROJECT.md §五：改 prompt 必须同步版本，否则归因表会把两次�
 cd backend
 
 # ① 离线口径测试（不连库、不烧 token）——第一道门
-python -m pytest tests/test_eval_metrics.py tests/test_eval_compare.py tests/test_intent.py tests/test_self_check.py -q
-# 期望：45 passed（口径 25 + 意图分类 8 + self_check 豁免 12）
+python -m pytest tests/test_eval_metrics.py tests/test_eval_compare.py \
+                 tests/test_eval_dashboard.py tests/test_intent.py tests/test_self_check.py -q
+# 期望：60 passed（口径 12 + 归因 9 + 看板 14 + 意图分类 13 + self_check 豁免 12）
+#                  注：口径与意图分类文件里有 parametrize，用例数 ≠ 函数数
 
 # ② 小样本全量（含 judge 演示；mock 下 judge 也会走替身链路）
 EVAL_LLM_JUDGE=true python -m app.agent.eval.runner --full --limit 5
@@ -299,6 +404,12 @@ EVAL_LLM_JUDGE=true python -m app.agent.eval.runner --full --limit 5
 python -m app.agent.eval.runner --compare
 # 期望：Markdown 表格 + 环比 ↑/↓；空库输出「暂无历史评测结果，先跑一次：make eval」
 
+# ③′ 可观测看板（W5-3 出口条件）
+cd .. && make dashboard           # → backend/data/dashboard.html
+make dashboard-demo               # 无数据库时验证看板本身 → data/dashboard.demo.html
+# 期望：✓ 看板已生成；双击 HTML 能看到 汇总卡片 / 归因表（↑↓）/ 延迟 P50-P95 / 两张 ECharts
+# 无库且不加 --demo 时：打印「数据库不可达…」并 exit 1，而不是抛一屏连接栈
+
 # ④ 质量门禁
 python -m ruff format app tests && python -m ruff check . && python -m mypy app && python -m pytest -q
 ```
@@ -307,7 +418,8 @@ python -m ruff format app tests && python -m ruff check . && python -m mypy app 
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| `✗ 数据库不可达` | 没起 Docker | 本段只验证口径用 ①；要跑 `--full` / `--compare` 先 `make up && make migrate && make seed-demo` |
+| `✗ 数据库不可达` | 没起 Docker | 本段只验证口径用 ①；要跑 `--full` / `--compare` / `make dashboard` 先 `make up && make migrate && make seed-demo`；只想验证看板本身用 `make dashboard-demo` |
+| 看板打开后没有图 | 离线，CDN 取不到 ECharts | 预期降级：卡片与表格照常可读，只有图表块空着。要离线看图就把 `echarts.min.js` 下载到本地并改模板里的 `src` |
 | 忠实度全是 None | `EVAL_LLM_JUDGE` 没开，或该条被拒答 | 开开关再跑；拒答行本就不评 |
 | judge 告警「忠实度评判失败」 | LLM 调用异常 | 不阻塞评测；查日志里的具体错误 |
 | `--compare` 没有箭头 | 只有一组历史结果，或两侧指标相等 / 一侧 None | 改一次 prompt（升 PROMPT_VERSION）再跑一次 |
@@ -344,7 +456,20 @@ python -m ruff format app tests && python -m ruff check . && python -m mypy app 
    更致命 —— 指标会把"标错的题"记成"系统的错"，把人引向错误的方向。
    `test_dataset_contract` 现在专门断言"含'规划/推荐/该去哪'的问题不许是 rag"，
    且 `refusal_correct` 对 recommend/plan 恒为 None（`test_refusal_correct_unscored_kinds_always_none` 钉死）。
-8. **豁免必须两层一起改**（阶段 5.3 真实事故）：5.2 只把指标口径改成
+8. **看板数字与终端表格必须同源**（W5-3 设计约束）：看板的分组、均值、P95、箭头
+   全部复用 `build_compare_rows`，**没有**另写一份聚合。曾经最容易犯的错就是
+   "看板里顺手再算一遍"，于是终端说 P95=12210、看板说 P95=11800，
+   两个出口两个答案，谁都不知道该信谁。看板只多算一个 P50，
+   为此把 `p50_latency_ms` 加进 `CompareRow`（Markdown 表不渲染它，`--compare` 输出不变）。
+9. **跨版本平均是错的**（W5-3 口径决策，见 §2.7）：看板顶部卡片取**最新一组**而不是
+   全部历史平均 —— 0.80 与 1.00 平均出来的 0.90 既不代表旧版也不代表新版，
+   却会被当成"系统当前的水平"。判据很简单：**一个数如果不对应任何一次真实运行，
+   它就不该出现在看板上**。
+10. **内嵌 JSON 必须转义 `<`**（W5-3）：`json.dumps` 只保证 JSON 合法，
+    不保证它待在 `<script>` 里安全。`prompt_version` 若含 `</script>` 会直接截断脚本块，
+    页面从此 JS 全废且不报错。所以 `_chart_payload` 额外把 `& < >` 转成 `\u00xx`。
+    这不是"防黑客"，是防**脏数据把看板弄成一个静默损坏的页面**。
+11. **豁免必须两层一起改**（阶段 5.3 真实事故）：5.2 只把指标口径改成
    "plan/recommend 不计引用率"，`SelfCheckNode` 却仍按事实题检查 ——
    指标说不杀、运行时照杀，plan 题继续被误杀。**改口径时要问一句"还有谁在执行这个口径"**：
    这次是 self_check，下次可能是 API 层的某个校验。豁免名单因此抽到
@@ -365,3 +490,11 @@ python -m ruff format app tests && python -m ruff check . && python -m mypy app 
 3. **验证最近秩**：在 `tests/test_eval_compare.py` 里加一条
    `percentile([1.0] * 10 + [100.0], 0.95)` 的断言（先手算：11 个样本，
    rank = ceil(0.95 × 11) = 11 → 100.0），再跑测试确认。
+4. **把看板弄坏一次（W5-3）**：`make dashboard-demo` 生成后，
+   在 `dashboard.py::_CARD_METRICS` 里把 `p95_latency_ms` 的小数位从 `0` 改成 `3`，
+   重新生成，看延迟卡片变成 `12210.000` —— 体会一下"卡片元数据表驱动"改一处就全局生效。
+   然后把某个分组名改成 `</script><script>alert(1)</script>`（直接改 `--demo` 的
+   `demo_records()` 即可），重新生成并在浏览器里看源码：
+   `test_untrusted_group_name_is_escaped` 守的就是这个口子。
+5. **验证"最新一组"口径（W5-3）**：往 `--demo` 里加第三组 `stage5.4`（Recall 故意设很低），
+   重新生成看板，确认顶部卡片跟着变成 5.4 的数 —— 而不是三组平均。

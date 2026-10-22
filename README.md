@@ -101,18 +101,26 @@ RRF 已实现加权 + 分档排名，留待三路（+记忆）时再用数据决
 
 原理讲解见 [docs/stages/stage4-memory-graph.md](./docs/stages/stage4-memory-graph.md)。
 
-**阶段 5 第一段已完成**（W5-1 评测扩充 + W5-2 归因对比；W5-3 可观测看板待下一段）：
+**阶段 5 已完成**（W5-1 评测扩充 + W5-2 归因对比 + W5-3 可观测看板）：
 
 ```bash
 python -m app.agent.eval.runner --full --limit 5          # 小样本全量（EVAL_LLM_JUDGE=true 时附忠实度）
 python -m app.agent.eval.runner --compare                 # prompt_version + embedding_model 归因对比表（含环比 ↑/↓）
+make dashboard                                            # W5-3：导出单文件静态看板 → backend/data/dashboard.html
+make dashboard-demo                                       # 无数据库时验证看板本身（页面标题注明 DEMO）
 ```
+
+W5-3 看板：汇总卡片（总用例数 / 平均 Recall / 平均引用率 / 忠实度 / P50-P95 延迟）+
+归因对比表（↑↓ 环比）+ 两张 ECharts（质量趋势、P50/P95 延迟分布）。
+单文件静态 HTML，双击即开；聚合与渲染是纯函数（`app/agent/eval/dashboard.py`），
+不连库也能单测。卡片取**最新一组**而不是跨版本平均 ——
+一个数如果不对应任何一次真实运行，就不该出现在看板上。
 
 评测集 29 条（22 rag + 4 refusal + 1 recommend + 2 plan；阶段 5.2 已把规划题从 rag 改判）；
 拒答口径收口为 `metrics.py` 纯函数（拒答不双扣：引用率/忠实度记 None，拒答正确性单独判；
 recommend/plan 两个事实性指标都不计入）；`SelfCheckNode` 对 plan/recommend 同样豁免逐句引用
 校验（阶段 5.3，规则意图分类 `app/utils/intent.py`，编号越界照查）；
-`--compare` 聚合改为 Python 纯函数（P95 最近秩），`pytest` **345 passed**
+`--compare` 聚合改为 Python 纯函数（P95 最近秩），看板复用同一套口径（额外算 P50），`pytest` **359 passed**
 （本机 PostgreSQL 在线，10 个 db 用例实跑通过；无库机器上为 335 passed / 10 skipped，
 跳过项均为需要真实 PostgreSQL 的用例；测试进程由 conftest 的 autouse fixture 强制
 `LLM_PROVIDER=mock` + `EMBEDDING_PROVIDER=hashing`，不碰真实模型）。
@@ -166,6 +174,7 @@ make eval               # 跑评测集
 make eval-time          # 中文时间表达解析准确率（不需要数据库）
 make eval-ablation      # 三档消融：纯向量 / +过滤 / +词面
 make eval-compare       # 按 prompt_version / embedding_model 输出对比表
+make dashboard          # 导出可观测看板（单文件静态 HTML）
 make reindex            # 换 embedding 模型后必须执行
 make resemantic         # 换语义标签字典后必须执行（阶段 7）
 make lint               # ruff + mypy
@@ -199,6 +208,8 @@ winget install GnuWin32.Make     # 装完重开终端即可用 make
 | `make eval-time` | `cd backend; python -m app.agent.eval.runner --time; cd ..` |
 | `make eval-ablation` | `cd backend; python -m app.agent.eval.runner --ablation; cd ..` |
 | `make eval-compare` | `cd backend; python -m app.agent.eval.runner --compare; cd ..` |
+| `make dashboard` | `cd backend; python -m app.scripts.export_dashboard; cd ..` |
+| `make dashboard-demo` | `cd backend; python -m app.scripts.export_dashboard --demo --out data/dashboard.demo.html; cd ..` |
 | `make web-dev` | `cd frontend; npm run dev; cd ..` |
 
 > 容器起来后建议先等 10~15 秒再跑迁移，等 healthcheck 变 `healthy`。

@@ -63,6 +63,10 @@ class CompareRow:
     citation_rate: float | None
     refusal_correct: float | None
     faithfulness: float | None
+    #: P50 常驻分组行（不只服务于看板）：中位数才是"典型一次请求有多慢"，
+    #: P95 回答的是"最慢的 5% 有多慢"。只看 P95 会以为系统整体很慢，
+    #: 只看 P50 会漏掉尾延迟失控 —— 两个一起看才不会误判。
+    p50_latency_ms: float | None
     p95_latency_ms: float | None
     #: 环比箭头，key 与 _METRICS 中的指标名一致；首组为空
     deltas: dict[str, str] = field(default_factory=dict)
@@ -142,6 +146,7 @@ def build_compare_rows(records: list[ResultRecord]) -> list[CompareRow]:
             citation_rate=_mean_or_none([r.citation_rate for r in group]),
             refusal_correct=_mean_or_none([r.refusal_correct for r in group]),
             faithfulness=_mean_or_none([r.faithfulness for r in group]),
+            p50_latency_ms=percentile([float(r.latency_ms) for r in group], 0.50),
             p95_latency_ms=percentile([float(r.latency_ms) for r in group], 0.95),
         )
         if previous is not None:

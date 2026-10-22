@@ -3,7 +3,7 @@
         caption-batch index-batch reindex \
         semantic-batch resemantic anchor-batch \
         exp-privacy exp-recommend test-degradation \
-        eval-tools cache-stats
+        eval-tools cache-stats dashboard dashboard-demo
 
 # ---------- 基础设施 ----------
 
@@ -91,6 +91,12 @@ eval-tools:                   # 阶段 3 W3-1 出口条件：工具选择准确�
 
 cache-stats:                  # 阶段 3 W3-3 出口条件：POI/路线类工具缓存命中率 ≥ 0.60
 	cd backend && python -m app.scripts.cache_stats
+
+dashboard:                    # 阶段 5 W5-3 出口条件：导出可观测看板（单文件静态 HTML）
+	cd backend && python -m app.scripts.export_dashboard
+
+dashboard-demo:               # 无数据库时验证看板本身：合成两组样例数据渲染（页面标题注明 DEMO）
+	cd backend && python -m app.scripts.export_dashboard --demo --out data/dashboard.demo.html
 
 # ---------- 批处理（幂等，--limit 控制单次成本）----------
 
