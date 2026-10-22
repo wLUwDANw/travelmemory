@@ -20,7 +20,7 @@ W5-1 评测扩充（口径收口 + judge + 数据集扩容）  ──┐
 
 | 块 | 出口条件（验收标准） | 状态 |
 | --- | --- | --- |
-| W5-1 | 引用率 / 拒答口径收口为 `metrics.py` 纯函数；新增忠实度指标（默认关）；评测集 22 rag + 4 refusal + 1 recommend + 1 plan | ✅ 已完成 |
+| W5-1 | 引用率 / 拒答口径收口为 `metrics.py` 纯函数；新增忠实度指标（默认关）；评测集 22 rag + 4 refusal + 1 recommend + 2 plan（阶段 5.2：规划题不再标 rag） | ✅ 已完成 |
 | W5-2 | `--compare` 按 prompt_version + embedding_model 分组输出 Markdown 归因表，含环比 ↑/↓ 与 P95；分组逻辑不依赖数据库、可单测 | ✅ 已完成 |
 | W5-3 | Run / Step / ToolCall 看板 | ⏸ 暂缓，下一段 |
 
@@ -60,6 +60,24 @@ refusal 用例：拒了 = 1.0，没拒 = 0.0
 昨天没演习、没喷水，这不是功劳，只是**什么都没发生**。
 如果给"没喷水"也打 1.0，那一个从来不开机的系统也能拿满分，
 指标就失去了分辨力。正常回答的质量由 `citation_rate` 负责，各管各的。
+
+还有一类用例连"拒答率"都不该进：**recommend / plan**。
+
+阶段 5.2 修过一个真实事故："帮我照着上次那趟再规划一个类似的路线。"
+被标成了 `rag`。可规划题不可能从库里"引用"出一个未来行程 ——
+self_check 一失败就拒答，这条题于是在 `refusal_correct` 上记了 0.0。
+**用 RAG 的尺子量规划的题**：指标被污染，真正的问题（题目标错了）反而被掩盖。
+
+所以 recommend / plan 对两个事实性指标都是 None：
+
+```
+rag：            拒了 = 0.0，没拒 = None
+recommend/plan： 恒为 None
+```
+
+它们的对错看的是"推荐/规划是否合理"，这个口径现阶段没有自动化指标
+（数据集 `note` 里写的"只计 hit@3"也要等阶段 7）。没有尺子的时候就**留白** ——
+错记一个 0.0 比不记更糟：它会让人以为"拒答率下降了"，从而去改一个本来没问题的模块。
 
 ### 2.2 LLM-as-a-Judge 为什么默认关闭
 
@@ -206,10 +224,14 @@ judge 默认关闭意味着大量行"未评"，存 0 会把"没评过"混进"评
 
 ### 3.5 评测集扩容（`backend/data/eval_cases.jsonl`）
 
-26 → 28 行：新增 1 条 rag（厦门清晨，验证新增 trip t9 可召回）+ 1 条 plan
+26 → 29 行：新增 1 条 rag（厦门清晨，验证新增 trip t9 可召回）+ 1 条 plan
 （江南古镇两日规划，验证规划类不计引用率、只要求生成合理）。
-最终构成：**22 rag + 4 refusal + 1 recommend + 1 plan**，
-`test_eval_metrics.py::test_dataset_contract` 钉死这个构成。
+阶段 5.2 再修正：把"帮我照着上次那趟再规划一个类似的路线。"从 rag **改判为 plan**
+（规划题引用不出未来行程，标 rag 会被 self_check 误杀，详见 §2.1），
+并补 1 条 rag（"去年四月我在杭州做了什么？"→ t2）保住被改走那条的检索覆盖。
+最终构成：**22 rag + 4 refusal + 1 recommend + 2 plan**，
+`test_eval_metrics.py::test_dataset_contract` 钉死这个构成，
+并专门断言"含'规划/推荐/该去哪'的问题不许是 rag"。
 
 ---
 
@@ -224,7 +246,7 @@ judge 默认关闭意味着大量行"未评"，存 0 会把"没评过"混进"评
 | `app/agent/prompts/loader.py` | `PROMPT_VERSION` → `pv2026.10-stage5.1` | 版本归因 |
 | `app/core/config.py` | `eval_llm_judge` 开关（默认关） | feature flag、成本控制 |
 | `app/models/eval.py` + `alembic/versions/0007_*.py` | `faithfulness` 列 + 迁移 | schema 演进、可空列语义 |
-| `data/eval_cases.jsonl` | 26 → 28 行（+1 rag +1 plan） | 评测集构成 |
+| `data/eval_cases.jsonl` | 26 → 29 行（+1 rag +1 plan；1 条 rag 改判 plan） | 评测集构成 |
 | `tests/test_eval_metrics.py`（新） | 口径 + judge 接线 + 数据集契约（替身，不烧 token） | Mock、回归防护 |
 | `tests/test_eval_compare.py`（新） | 分组 / P95 / 箭头 / 排序 / 渲染全纯数据 | 不依赖 DB 的单测 |
 | `.env.example` | `EVAL_LLM_JUDGE=false` 示例条目 | 配置即文档 |
@@ -238,7 +260,7 @@ cd backend
 
 # ① 离线口径测试（不连库、不烧 token）——第一道门
 python -m pytest tests/test_eval_metrics.py tests/test_eval_compare.py -q
-# 期望：24 passed
+# 期望：25 passed
 
 # ② 小样本全量（含 judge 演示；mock 下 judge 也会走替身链路）
 EVAL_LLM_JUDGE=true python -m app.agent.eval.runner --full --limit 5
@@ -281,6 +303,18 @@ python -m ruff format app tests && python -m ruff check . && python -m mypy app 
 5. **P95 的 None 传播**：任一侧为 None 就不给箭头。老版 SQL 版对比表把
    "没开 judge"的组和"开了 judge"的组直接摆在一起，忠实度一列一个数一个 `-`，
    没有箭头反而看不懂 —— 现在的约定是"不可比就不比"。
+6. **模型的"画蛇添足"会被 self_check 误杀**（阶段 5.2 真实事故）：问"去年秋天去过
+   哪些古镇"，模型生成了一句"注：证据显示年份为 2025 年……"—— 这句注脚没有 `[n]`，
+   self_check 判"缺少引用"，最终整段答案被拒答（用户实测）。
+   解法在 **prompt 层**：`system.md` 铁律第 6 条禁止注脚/免责声明/补充说明，
+   并明确"相对时间直接按证据里的年份陈述，不要解释换算过程"；
+   同时把 `PROMPT_VERSION` 升到 `pv2026.10-stage5.2`（归因表靠它区分两次行为）。
+   **没有**去软句白名单里加"注"—— 那等于给"不带引用的事实句"开闸，
+   100% 引用率红线会被这句例外蛀空。prompt 管行为，self_check 管红线，各管各的。
+7. **规划题被标成 rag**（阶段 5.2 真实事故，设计分析见 §2.1）：题目标错比指标算错
+   更致命 —— 指标会把"标错的题"记成"系统的错"，把人引向错误的方向。
+   `test_dataset_contract` 现在专门断言"含'规划/推荐/该去哪'的问题不许是 rag"，
+   且 `refusal_correct` 对 recommend/plan 恒为 None（`test_refusal_correct_unscored_kinds_always_none` 钉死）。
 
 ---
 

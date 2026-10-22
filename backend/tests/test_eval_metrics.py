@@ -33,7 +33,18 @@ def test_refusal_correct_other_kinds():
     """误拒答是错误（0.0）；正常回答不计入（None）而不是送分。"""
     assert refusal_correct("rag", refused=True) == 0.0
     assert refusal_correct("rag", refused=False) is None
-    assert refusal_correct("plan", refused=False) is None
+
+
+def test_refusal_correct_unscored_kinds_always_none():
+    """阶段 5.2 真实事故的回归：recommend / plan 不计入拒答率。
+
+    "帮我照着上次那趟再规划一个类似的路线。"曾被标成 rag：规划题引用不出
+    未来行程，self_check 一失败就拒答，于是在 refusal_correct 上记 0.0 ——
+    用 RAG 的尺子量规划的题。现在这类 kind 恒为 None。
+    """
+    for kind in ("recommend", "plan"):
+        assert refusal_correct(kind, refused=True) is None
+        assert refusal_correct(kind, refused=False) is None
 
 
 # ---------------------------------------------------------------- citation_rate_for
@@ -183,7 +194,7 @@ async def test_full_eval_refused_answer_not_judged():
 
 # ---------------------------------------------------------------- 评测集契约
 def test_dataset_contract():
-    """评测集扩容后的构成契约：22 rag + 4 refusal + 1 recommend + 1 plan。"""
+    """评测集构成契约：22 rag + 4 refusal + 1 recommend + 2 plan（阶段 5.2 起）。"""
     items = load_dataset()
     kinds = [item.kind for item in items]
     assert kinds.count("rag") >= 10
@@ -193,3 +204,16 @@ def test_dataset_contract():
     for item in items:
         if item.kind in {"recommend", "plan"}:
             assert not item.expected_evidence, f"{item.kind} 用例不应带 expected_evidence"
+
+    # 阶段 5.2：规划/推荐类问题不许再被标成 rag（真实事故的回归）
+    planning = [i for i in items if any(w in i.question for w in ("规划", "推荐", "该去哪"))]
+    assert planning, "评测集应含规划/推荐类用例"
+    for item in planning:
+        assert item.kind in {"plan", "recommend"}, (
+            f"规划类问题被标成了 {item.kind}: {item.question}"
+        )
+    by_question = {i.question: i for i in items}
+    converted = by_question.get("帮我照着上次那趟再规划一个类似的路线。")
+    assert converted is not None and converted.kind == "plan", (
+        "该规划题必须保持 plan（阶段 5.2 回归）"
+    )

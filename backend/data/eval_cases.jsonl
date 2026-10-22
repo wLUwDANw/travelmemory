@@ -1,6 +1,6 @@
 {"kind":"rag","question":"我去年秋天去过哪些古镇？","expected_evidence":[{"source_type":"trip","source_id":"t1","chunk_index":0}]}
 {"kind":"rag","question":"我在杭州最喜欢哪类地点？","expected_evidence":[{"source_type":"place","source_id":"p12","chunk_index":0}]}
-{"kind":"rag","question":"帮我照着上次那趟再规划一个类似的路线。","expected_evidence":[{"source_type":"trip","source_id":"t2","chunk_index":0}]}
+{"kind":"plan","question":"帮我照着上次那趟再规划一个类似的路线。","expected_answer":"含杭州西湖/灵隐寺等地的合理类似路线","note":"规划类：不计入引用率与拒答率，只要求生成合理"}
 {"kind":"rag","question":"前年五一我在哪？","expected_evidence":[{"source_type":"trip","source_id":"t3","chunk_index":0}]}
 {"kind":"rag","question":"洛阳那趟我都打卡了哪些景点？","expected_evidence":[{"source_type":"trip","source_id":"t3","chunk_index":0},{"source_type":"place","source_id":"p14","chunk_index":0}]}
 {"kind":"rag","question":"我在乌镇都做了什么？","expected_evidence":[{"source_type":"place","source_id":"p10","chunk_index":0}]}
@@ -26,3 +26,4 @@
 {"kind":"recommend","question":"去完洛阳该去哪？","expected_answer":"自然风光类","note":"群体语义先验，阶段 7 才启用；不计入 citation_rate，只计 hit@3"}
 {"kind":"rag","question":"厦门那趟我清晨拍了什么？","expected_evidence":[{"source_type":"trip","source_id":"t9","chunk_index":0}]}
 {"kind":"plan","question":"帮我把去年秋天江南古镇那趟安排成一个两天的行程计划。","expected_answer":"含乌镇/西塘等古镇的两日合理安排","note":"规划类：不计入引用率，只要求生成合理"}
+{"kind":"rag","question":"去年四月我在杭州做了什么？","expected_evidence":[{"source_type":"trip","source_id":"t2","chunk_index":0}]}

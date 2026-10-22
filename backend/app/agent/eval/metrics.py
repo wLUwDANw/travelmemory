@@ -29,8 +29,9 @@ REFUSAL_MARKERS = (
     "无法回答这个问题",
 )
 
-#: 不计入引用率统计的 kind：推荐/规划类答案允许没有逐句引用
-UNSCORED_CITATION_KINDS = frozenset({"recommend", "plan"})
+#: 不计入**事实性指标**（citation_rate / refusal_correct）的 kind：
+#: 推荐/规划类只要求"生成合理"，用 RAG 的尺子量它们是错口径
+UNSCORED_KINDS = frozenset({"recommend", "plan"})
 
 
 @dataclass
@@ -87,14 +88,24 @@ def refusal_correct(kind: str, refused: bool) -> float | None:
     """拒答是否正确（计入指标的形式）。
 
     - refusal 用例：拒了 = 1.0，没拒 = 0.0（漏拒答是错误）
-    - 其他用例：拒了 = 0.0（误拒答是错误），没拒 = None（不计入）
+    - recommend / plan：**恒为 None** —— 只要求"生成合理"，
+      该不该拒答不由这个指标度量
+    - 其余（rag）：拒了 = 0.0（误拒答是错误），没拒 = None（不计入）
 
-    为什么"没拒答的非 refusal 用例"是 None 而不是 1.0：本指标只度量
+    为什么 recommend / plan 要整个豁免（阶段 5.2 真实事故）：
+    "帮我照着上次那趟再规划一个类似的路线。"曾被标成 rag，而规划题
+    不可能从库里"引用"出一个未来行程，self_check 一失败就拒答，
+    于是在 refusal_correct 上记 0.0 —— **用 RAG 的尺子量规划的题**。
+    指标被污染，真正的问题（题目标错了）反而被掩盖。
+
+    为什么"没拒答的 rag"是 None 而不是 1.0：本指标只度量
     「系统拒答时拒得对不对」；正常回答的质量由 citation_rate 负责。
     两边都记 1.0 会让"什么都没发生"也变成加分项，指标失去分辨力。
     """
     if kind == "refusal":
         return 1.0 if refused else 0.0
+    if kind in UNSCORED_KINDS:
+        return None
     return 0.0 if refused else None
 
 
@@ -107,7 +118,7 @@ def citation_rate_for(kind: str, answer: str, *, refused: bool) -> float | None:
     - recommend / plan → None：群体先验与规划类不计引用率
     - 其余 → citation_rate(answer)
     """
-    if refused or kind in UNSCORED_CITATION_KINDS:
+    if refused or kind in UNSCORED_KINDS:
         return None
     return citation_rate(answer)
 

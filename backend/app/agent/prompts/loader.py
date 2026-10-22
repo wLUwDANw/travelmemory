@@ -15,7 +15,7 @@ from pathlib import Path
 #: 每次修改 app/agent/prompts/ 下的任何文件都要递增此版本号
 #: （阶段 5 W5-1：新增 eval_faithfulness.md —— 只影响 judge 调用，
 #:   但按约定仍整体递增，否则 judge 结果无法与 prompt 版本对应上）
-PROMPT_VERSION = "pv2026.10-stage5.1"
+PROMPT_VERSION = "pv2026.10-stage5.2"
 
 PROMPT_DIR = Path(__file__).parent
 _PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
