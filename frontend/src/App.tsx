@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { Toaster } from './components/ui/toaster';
 import { AgentPage } from './pages/AgentPage';
 import { MapPage } from './pages/MapPage';
 import { SharePage } from './pages/SharePage';
@@ -47,6 +48,8 @@ export default function App() {
         {tab === 'map' && <MapPage sharePlaces={mapPlaces} />}
         {tab === 'share' && <SharePage onViewOnMap={viewOnMap} />}
       </main>
+      {/* 全局挂一份：toast 可能在任意页面的深层回调里触发，多挂会互相遮挡 */}
+      <Toaster />
     </div>
   );
 }

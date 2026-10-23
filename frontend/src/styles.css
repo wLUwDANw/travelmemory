@@ -1,19 +1,58 @@
-/* 阶段 2 的最小样式。
+/* Tailwind 管 billboard 级的原子类，手写 CSS 管阶段 2 留下的页面级规则。
  *
- * 为什么现在不用 Tailwind：本阶段只是「对话页骨架」，一套 CSS 变量 + 少量类就能跑，
- * 引入 Tailwind 与 shadcn/ui 的收益要到阶段 6（地图 + 多页面）才体现出来。
- * 到那时一次性接入，避免现在为了骨架引入、后面再推翻重做。
+ * 为什么两者共存而不是一次性重写：阶段 2 的对话页（`AgentPage`）样式已经过人工验收，
+ * 为了引入 Tailwind 把它们推翻重做，收益为零、回归风险为正。所以这里保留原有规则，
+ * 阶段 6 新增/改版的页面（信物分享、地图相册）一律用 Tailwind + `components/ui/`。
+ *
+ * 过渡期唯一的坑是变量重名：原 `--border/--accent/--muted` 是 **hex 原色**，
+ * 而 Tailwind 主题要求它们是 **HSL 三元组**（`hsl(hsl(var(--border)))` 才能拼出颜色）。
+ * 处理方式：这三个变量改成 HSL 三元组，所有旧引用点在外面套一层 `hsl()`。
  */
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
+  /* ---- 阶段 2 遗留（继续被 .agent-page 等规则引用）---- */
   --bg: #f7f7f5;
   --panel: #ffffff;
-  --border: #e3e2de;
   --text: #24231f;
-  --muted: #7b7a73;
-  --accent: #2f6f5e;
   --user: #2f6f5e;
   --danger: #b4483c;
+
+  /* ---- Tailwind / shadcn 主题层（一律 HSL 三元组）---- */
+  --background: 60 11% 96%;
+  --foreground: 48 8% 13%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 48 8% 13%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 48 8% 13%;
+
+  /* 主色沿用 `--accent`（#2f6f5e → 164 41% 31%），保证两个体系的绿是同一个绿 */
+  --primary: 164 41% 31%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 60 5% 95%;
+  --secondary-foreground: 48 8% 20%;
+
+  --muted: 52 3% 47%;
+  --muted-foreground: 48 4% 42%;
+
+  --accent: 164 41% 31%;
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 6 50% 47%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 48 8% 88%;
+  --input: 48 8% 84%;
+  --ring: 164 41% 31%;
+
+  --radius: 0.625rem;
+
   font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   color-scheme: light;
 }
@@ -44,7 +83,7 @@ body {
 
 .agent-header .hint,
 .empty {
-  color: var(--muted);
+  color: hsl(var(--muted));
   font-size: 13px;
   margin: 0;
 }
@@ -79,7 +118,7 @@ body {
 
 .message-assistant .bubble {
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-bottom-left-radius: 4px;
 }
 
@@ -94,7 +133,7 @@ body {
   width: 6px;
   height: 14px;
   margin-left: 2px;
-  background: var(--accent);
+  background: hsl(var(--accent));
   vertical-align: text-bottom;
   animation: blink 1s steps(2, start) infinite;
 }
@@ -120,7 +159,7 @@ body {
 }
 
 .chip-label {
-  color: var(--muted);
+  color: hsl(var(--muted));
 }
 
 .chip {
@@ -128,14 +167,14 @@ body {
   border-radius: 999px;
   background: #eef3f0;
   border: 1px solid #dbe5df;
-  color: var(--accent);
+  color: hsl(var(--accent));
 }
 
 .meta-row {
   display: flex;
   gap: 10px;
   font-size: 12px;
-  color: var(--muted);
+  color: hsl(var(--muted));
 }
 
 .meta-row .refused {
@@ -148,18 +187,18 @@ body {
 
 .evidence-toggle {
   background: none;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
   padding: 4px 10px;
   cursor: pointer;
   font-size: 12px;
-  color: var(--muted);
+  color: hsl(var(--muted));
 }
 
 .evidence-list {
   margin: 8px 0 0;
   padding-left: 20px;
-  color: var(--muted);
+  color: hsl(var(--muted));
 }
 
 .evidence-list li {
@@ -184,7 +223,7 @@ body {
 .composer input {
   flex: 1;
   padding: 10px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
   font-size: 14px;
   outline: none;
@@ -192,14 +231,14 @@ body {
 }
 
 .composer input:focus {
-  border-color: var(--accent);
+  border-color: hsl(var(--accent));
 }
 
 .composer button {
   padding: 10px 18px;
   border: none;
   border-radius: 10px;
-  background: var(--accent);
+  background: hsl(var(--accent));
   color: #fff;
   font-size: 14px;
   cursor: pointer;
@@ -243,7 +282,7 @@ body {
   width: 10px;
   height: 10px;
   border: 2px solid #b9cbe8;
-  border-top-color: var(--accent);
+  border-top-color: hsl(var(--accent));
   border-radius: 50%;
   animation: tool-spin 0.8s linear infinite;
 }
@@ -262,7 +301,7 @@ body {
   margin: 8px 0;
   padding: 8px 12px;
   border: 1px solid #d9e3f5;
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid hsl(var(--accent));
   border-radius: 8px;
   background: #fbfcff;
   font-size: 12px;
@@ -283,7 +322,7 @@ body {
 .tool-badge {
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--accent);
+  background: hsl(var(--accent));
   color: #fff;
 }
 
@@ -322,7 +361,7 @@ body {
   gap: 4px;
   padding: 8px 16px 0;
   background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .app-nav button {
@@ -330,14 +369,14 @@ body {
   background: transparent;
   padding: 8px 14px;
   font-size: 14px;
-  color: var(--muted);
+  color: hsl(var(--muted));
   cursor: pointer;
   border-bottom: 2px solid transparent;
 }
 
 .app-nav button.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  color: hsl(var(--accent));
+  border-bottom-color: hsl(var(--accent));
 }
 
 .app-main {
@@ -369,7 +408,7 @@ body {
   display: flex;
   gap: 16px;
   font-size: 13px;
-  color: var(--muted);
+  color: hsl(var(--muted));
 }
 
 .map-canvas-wrap {
@@ -391,9 +430,9 @@ body {
   padding: 6px 10px;
   border-radius: 8px;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   font-size: 12px;
-  color: var(--muted);
+  color: hsl(var(--muted));
 }
 
 .map-empty-hint {
@@ -405,7 +444,7 @@ body {
   max-width: 420px;
   padding: 16px 20px;
   border-radius: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   background: var(--panel);
 }
 
@@ -431,7 +470,7 @@ body {
   margin-top: 20px;
   padding: 16px;
   border-radius: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   background: var(--panel);
 }
 
@@ -441,8 +480,8 @@ body {
 }
 
 .share-page button {
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: 1px solid hsl(var(--accent));
+  background: hsl(var(--accent));
   color: #fff;
   border-radius: 8px;
   padding: 8px 14px;
@@ -457,13 +496,13 @@ body {
 
 .identity-card code {
   font-size: 12px;
-  color: var(--muted);
+  color: hsl(var(--muted));
 }
 
 .gen-message {
   margin-top: 10px;
   font-size: 13px;
-  color: var(--accent);
+  color: hsl(var(--accent));
 }
 
 .verify-row {
@@ -471,7 +510,7 @@ body {
 }
 
 .place-card {
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
   padding: 10px 12px;
   margin-top: 8px;
@@ -485,9 +524,9 @@ body {
 .place-geo,
 .place-photos {
   font-size: 12px;
-  color: var(--muted);
+  color: hsl(var(--muted));
 }
 
 .place-geo {
-  color: var(--accent);
+  color: hsl(var(--accent));
 }
