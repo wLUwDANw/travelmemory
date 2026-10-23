@@ -1,4 +1,4 @@
-/** 信物分享页（W6-4 骨架）：生成 → 下载 → 导入 → 验签 → 上地图。
+/** 信物分享页：生成 → 下载 → 导入 → 验签 → 上地图。
  *
  * ## 这一页把整条链路接起来
  *
@@ -10,9 +10,18 @@
  *              └─ radius > 0 的地点 →「在地图上查看」→ MapPage 画半透明圈
  * ```
  *
+ * ## 文件怎么分的
+ *
+ * 这一页的状态编排留在本文件（identity / friends / 收件人勾选 / 生成 / 导入），
+ * 展示拆成四个子组件同目录下的兄弟文件：
+ * `IdentityCard`（公钥与不可逆重置）、`FriendsCard`（通讯录）、
+ * `RecipientCard`（收件人多选）、`ImportCard`（文件与验签报告）。
+ * 拆分的理由不是"文件太短"，而是它们各自有一份**独立的关注点与失效场景**，
+ * 混在一个 400 行的渲染函数里改一处必看错一处。
+ *
  * ## 刻意不做（留给后续阶段 / 人类）
  *
- * - 旅程编辑器、可见性勾选树、好友名单（TrailShare 规范 §8 的完整 UI）；
+ * - 旅程编辑器、可见性勾选树（TrailShare 规范 §8 的完整 UI）；
  * - 接受/拒绝落本地记忆与溯源边（`store/` 层未移植）；
  * - 照片压缩与相册选择（W6-3 的桥已就位，UI 未接）。
  *
@@ -20,43 +29,91 @@
  * 有 100+ 条单测守着。
  */
 
-import { useCallback, useState } from 'react';
-import type { UnpackedPlace } from '../../types/share';
+import { useCallback, useMemo, useState } from 'react';
+import { ShieldCheck } from 'lucide-react';
+
+import { Badge } from '../../components/ui/badge';
+import { toast } from '../../components/ui/use-toast';
 import { obfuscateLocation } from '../../services/api/privacy';
 import { prepareShare } from '../../services/share/prepare';
-import { unpackForViewer } from '../../services/share/unpack';
 import { SHARE_FILE_EXTENSION } from '../../services/share/schema';
-import { clearIdentity, loadOrCreateIdentity } from './identity';
+import { unpackForViewer } from '../../services/share/unpack';
+import type { UnpackedPlace, UnpackViewerResult } from '../../types/share';
 import { demoTrip, demoVisibility } from './demoTrip';
+import { FriendsCard } from './FriendsCard';
+import { IdentityCard } from './IdentityCard';
+import { ImportCard } from './ImportCard';
+import { clearIdentity, loadOrCreateIdentity } from './identity';
+import { listFriends, type Friend } from './friends';
+import { RecipientCard } from './RecipientCard';
 
 export interface SharePageProps {
   /** 「在地图上查看」：把解出的地点交给地图页渲染模糊圈。 */
   onViewOnMap?: (places: UnpackedPlace[]) => void;
 }
 
+/** 把包落成文件下载。`Blob` + 临时 `<a>` 是最省事也最稳的一条路；
+ *  注意 Firefox 要求 anchor 挂到文档上才会触发下载，`revokeObjectURL` 必须等 click 之后。 */
+function downloadShareFile(pkg: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
 export function SharePage({ onViewOnMap }: SharePageProps) {
   // 惰性初始化：localStorage 同步读，useState 初始函数只跑一次（StrictMode 双跑也安全）
   const [identity, setIdentity] = useState<ReturnType<typeof loadOrCreateIdentity>>(() => loadOrCreateIdentity());
+  const [friends, setFriends] = useState<Friend[]>(() => listFriends());
+
+  // 自己默认在收件人里（不信 "写死"，用户可以取消）
+  const [selfSelected, setSelfSelected] = useState(true);
+  const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
 
   const [generating, setGenerating] = useState(false);
-  const [genMessage, setGenMessage] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
-  const [view, setView] = useState<Awaited<ReturnType<typeof unpackForViewer>> | null>(null);
+  const [view, setView] = useState<UnpackViewerResult | null>(null);
+
+  /** 勾选出来的收件人公钥（`bare hex` 或 `ed25519:` 前缀都行，`pack` 两种都认）。 */
+  const recipientPubkeys = useMemo(() => {
+    const friendKeys = selectedFriendIds
+      .map((id) => friends.find((friend) => friend.id === id)?.pubkey)
+      .filter((key): key is string => typeof key === 'string');
+    return selfSelected ? [identity.pubkey, ...friendKeys] : friendKeys;
+  }, [friends, identity.pubkey, selectedFriendIds, selfSelected]);
+
+  /** 通讯录变了就重读，并顺手把已经不存在的好友从勾选里摘掉
+   *  （留着一个幽灵 id 会让"勾选人数"和实际收件人对不上）。 */
+  const refreshFriends = useCallback(() => {
+    const next = listFriends();
+    setFriends(next);
+    setSelectedFriendIds((prev) => prev.filter((id) => next.some((friend) => friend.id === id)));
+  }, []);
+
+  const toggleFriend = useCallback((id: string, next: boolean) => {
+    setSelectedFriendIds((prev) =>
+      next ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((item) => item !== id),
+    );
+  }, []);
 
   const generate = useCallback(async () => {
     setGenerating(true);
-    setGenMessage(null);
+    setWarnings([]);
     try {
-      // 收件人填自己：单窗口也能验证"打包 → 解包 → 模糊圈"全链路。
-      // 真实分享时这里填好友的 Ed25519 公钥（bare hex 或带前缀都认）。
       const result = await prepareShare(
         {
           groups: [
             {
               trip: demoTrip(),
               visibility: demoVisibility(),
-              recipientPubkeys: [identity.pubkey],
+              recipientPubkeys,
             },
           ],
           senderIdentity: identity,
@@ -66,26 +123,24 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
         { obfuscate: obfuscateLocation },
       );
 
-      const blob = new Blob([JSON.stringify(result.pkg, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `${result.pkg.shareId}${SHARE_FILE_EXTENSION}`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-
-      const warned = result.warnings.length;
-      setGenMessage(
-        warned > 0
-          ? `已生成 ${result.pkg.shareId}（${warned} 个地点模糊失败，已按规范原版打包，未写入坐标）`
-          : `已生成 ${result.pkg.shareId}（地点坐标已模糊）`,
-      );
+      downloadShareFile(result.pkg, `${result.pkg.shareId}${SHARE_FILE_EXTENSION}`);
+      setWarnings(result.warnings);
+      toast({
+        variant: 'success',
+        title: '信物已生成',
+        description: `${result.pkg.shareId}，收件人 ${recipientPubkeys.length} 人`,
+      });
     } catch (exc) {
-      setGenMessage(`生成失败：${(exc as Error).message}`);
+      // 失败不静默：打包失败通常意味着"这个文件没发出去"，用户必须立刻知道
+      toast({
+        variant: 'destructive',
+        title: '生成失败',
+        description: (exc as Error).message,
+      });
     } finally {
       setGenerating(false);
     }
-  }, [identity]);
+  }, [identity, recipientPubkeys]);
 
   const importFile = useCallback(
     async (file: File) => {
@@ -95,102 +150,71 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
       try {
         const text = await file.text();
         const parsed = JSON.parse(text) as unknown;
-        const result = await unpackForViewer(parsed, { privHex: identity.privHex });
-        setView(result);
+        setView(await unpackForViewer(parsed, { privHex: identity.privHex }));
       } catch (exc) {
-        setImportError(`读取失败：${(exc as Error).message}`);
+        setImportError((exc as Error).message);
       } finally {
         setImporting(false);
       }
     },
-    [identity],
+    [identity.privHex],
   );
 
-  const places: UnpackedPlace[] =
-    view && view.ok ? view.groups.flatMap((group) => group.places) : [];
+  /** 重置身份：种子没了就再也回不去，所以确认由 IdentityCard 的 Dialog 拦一道。 */
+  const resetIdentity = useCallback(() => {
+    clearIdentity();
+    setIdentity(loadOrCreateIdentity());
+    // 旧身份解过的东西对新身份没有意义，连带着清掉，避免"看着还在但已经读不了"的假象
+    setView(null);
+    setImportError(null);
+    setWarnings([]);
+    toast({
+      title: '身份已重置',
+      description: '新的密钥对已在本机生成，记得把新公钥重新发给好友。',
+    });
+  }, []);
 
   return (
-    <div className="share-page">
-      <header className="share-header">
-        <h1>信物分享</h1>
-        <p className="hint">
+    <div className="mx-auto max-w-3xl space-y-6 p-4">
+      <header className="space-y-2">
+        <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
+          <ShieldCheck className="h-6 w-6 text-emerald-600" />
+          信物分享
+          <Badge variant="secure">端到端加密</Badge>
+        </h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
           定向加密信物（TrailShare 协议 ts-2026.4）：只有指定收件人能解开；私钥只在本机，绝不上传。
         </p>
       </header>
 
-      <section className="identity-card">
-        <h2>我的身份</h2>
-        <p>
-          公钥指纹：<code>{identity.pubkey.slice(0, 16)}…</code>
-        </p>
-        <button
-          onClick={() => {
-            clearIdentity();
-            setIdentity(loadOrCreateIdentity());
-            setGenMessage('已重置身份');
-          }}
-        >
-          重置身份
-        </button>
-      </section>
+      <IdentityCard identity={identity} onReset={resetIdentity} />
 
-      <section className="share-generate">
-        <h2>生成信物</h2>
-        <p className="hint">用内置示例旅程（洛阳两日，一个地点带坐标）打包，收件人是本机身份。</p>
-        <button disabled={generating} onClick={() => void generate()}>
-          {generating ? '生成中…' : '生成并下载 .trailshare'}
-        </button>
-        {genMessage && <p className="gen-message">{genMessage}</p>}
-      </section>
+      <FriendsCard
+        friends={friends}
+        ownPubHex={identity.pubHex}
+        onChanged={refreshFriends}
+      />
 
-      <section className="share-import">
-        <h2>导入信物</h2>
-        <input
-          type="file"
-          accept=".trailshare,application/json"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void importFile(file);
-          }}
-        />
-        {importing && <p>解析中…</p>}
-        {importError && <p className="error-bar">{importError}</p>}
-        {view && !view.ok && <p className="error-bar">{view.reason}</p>}
-        {view && view.ok && (
-          <div className="import-result">
-            <p>
-              来自：<strong>{view.from.displayName}</strong>（{view.from.pubkey.slice(0, 12)}…）
-            </p>
-            <p className="verify-row">
-              验签 {view.report.signatureOk ? '✅' : '❌'} · 承诺{' '}
-              {view.report.commitmentOk === null ? '—' : view.report.commitmentOk ? '✅' : '❌'} · 链{' '}
-              {view.report.chainOk === null ? '—' : view.report.chainOk ? '✅' : '❌'}
-            </p>
-            {view.groups.map((group) => (
-              <div key={group.groupId} className="timeline">
-                {group.places.map((place) => (
-                  <div key={place.placeId} className="place-card">
-                    <div className="place-title">
-                      {place.label ? `${place.label} · ` : ''}
-                      {place.name}
-                    </div>
-                    <div className="place-meta">
-                      {place.date} · {place.tag} · {place.intensity}
-                    </div>
-                    {typeof place.radius === 'number' && place.radius > 0 ? (
-                      <div className="place-geo">模糊圈：半径约 {place.radius} 米（真实位置只在圈内某处）</div>
-                    ) : null}
-                    <div className="place-photos">{place.photos.length} 张照片</div>
-                  </div>
-                ))}
-              </div>
-            ))}
-            {places.length > 0 && onViewOnMap && (
-              <button onClick={() => onViewOnMap(places)}>在地图上查看{places.length > 0 ? `（${places.length} 个地点）` : ''}</button>
-            )}
-          </div>
-        )}
-      </section>
+      <RecipientCard
+        selfSelected={selfSelected}
+        onToggleSelf={setSelfSelected}
+        selfLabel={`指纹 ${identity.pubHex.slice(0, 8)}`}
+        friends={friends}
+        selectedFriendIds={selectedFriendIds}
+        onToggleFriend={toggleFriend}
+        recipientCount={recipientPubkeys.length}
+        generating={generating}
+        onGenerate={() => void generate()}
+        warnings={warnings}
+      />
+
+      <ImportCard
+        importing={importing}
+        error={importError}
+        view={view}
+        onFile={(file) => void importFile(file)}
+        onViewOnMap={onViewOnMap}
+      />
     </div>
   );
 }
