@@ -306,3 +306,188 @@ body {
   margin: 6px 0 0;
   color: #6b7a90;
 }
+
+/* ---------------- 阶段 6：应用壳 + 地图 + 信物 ----------------
+   地图页必须撑满视口（高德容器要显式高度），所以 .app-main 不用
+   agent 页那套"居中窄列" —— 三页共用一个壳，布局差异在各页自己处理。 */
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-nav {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-nav button {
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.app-nav button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 地图页 */
+
+.map-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 45px);
+}
+
+.map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+}
+
+.map-header h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.layer-toggles {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.map-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.map-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.map-hidden-hint,
+.map-empty-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.map-empty-hint {
+  bottom: 44px;
+}
+
+.map-fallback {
+  margin: 24px auto;
+  max-width: 420px;
+  padding: 16px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.map-footer {
+  padding: 8px 16px;
+  font-size: 12px;
+}
+
+/* 信物页 */
+
+.share-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 16px 60px;
+}
+
+.share-header h1 {
+  font-size: 20px;
+  margin: 0 0 6px;
+}
+
+.share-page section {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.share-page h2 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.share-page button {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.share-page button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.identity-card code {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.gen-message {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.verify-row {
+  font-size: 13px;
+}
+
+.place-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+
+.place-title {
+  font-weight: 600;
+}
+
+.place-meta,
+.place-geo,
+.place-photos {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.place-geo {
+  color: var(--accent);
+}

@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 .env
+.env.local
+*.local
+.pytest-tmproot/
 .venv/
 node_modules/
 dist/
@@ -13,3 +16,5 @@ research/results/*
 .DS_Store
 .idea/
 .vscode/
+# 自动化任务的运行时记忆目录（每个 automation 一份，不入库）
+.workbuddy/memory/automations/

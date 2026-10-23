@@ -8,7 +8,11 @@
 | `cache` | 走 Redis 共享缓存（关 = 进程内内存实现） | False | 阶段 3 W3-3 |
 | `rerank` | 重排接管融合结果 | False | 阶段 3 W3-4 |
 | `hnsw` | HNSW 近似检索（含回退精确扫描） | False | 阶段 3 W3-4 |
-| `privacy` / `semantic` / `zk` / `chain` | 科研轨扩展 | False | 阶段 7 |
+| `photo_import` | W6-1 本地照片导入（EXIF + 指纹去重） | False | 阶段 6 |
+| `map_album` | W6-2 行程聚类 + 地图相册 | False | 阶段 6 |
+| `native_bridge` | W6-3 端能力抽象（相册/缩略图/权限） | False | 阶段 6 |
+| `privacy` | W6-4 地理模糊 + 定向加密信物 | False | 阶段 6 |
+| `semantic` / `zk` / `chain` | 科研轨扩展 | False | 阶段 7 |
 
 ## 为什么是薄封装而不是另一套 pydantic-settings
 
@@ -32,12 +36,15 @@ from __future__ import annotations
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConfigError
 
-#: 全部开关名。**顺序即含义分组**：阶段 3 在前，阶段 7 在后。
+#: 全部开关名。**顺序即含义分组**：阶段 3 → 阶段 6 → 阶段 7。
 FLAG_NAMES: tuple[str, ...] = (
     "tools",
     "cache",
     "rerank",
     "hnsw",
+    "photo_import",
+    "map_album",
+    "native_bridge",
     "privacy",
     "semantic",
     "zk",
@@ -47,8 +54,11 @@ FLAG_NAMES: tuple[str, ...] = (
 #: 阶段 3 四个开关（`make test-degradation` 的默认态就由它们定义）
 STAGE3_FLAG_NAMES: tuple[str, ...] = ("tools", "cache", "rerank", "hnsw")
 
+#: 阶段 6 四个开关（照片导入 / 地图相册 / 端能力 / 地理模糊+加密信物）
+STAGE6_FLAG_NAMES: tuple[str, ...] = ("photo_import", "map_album", "native_bridge", "privacy")
+
 #: 阶段 7 科研轨开关（本阶段只做统一管理，不接任何逻辑）
-STAGE7_FLAG_NAMES: tuple[str, ...] = ("privacy", "semantic", "zk", "chain")
+STAGE7_FLAG_NAMES: tuple[str, ...] = ("semantic", "zk", "chain")
 
 
 def _settings_field(name: str) -> str:
@@ -98,3 +108,14 @@ def stage3_flags(settings: Settings | None = None) -> dict[str, bool]:
 def stage3_all_disabled(settings: Settings | None = None) -> bool:
     """阶段 3 四个开关是否全部关闭 —— 即"阶段 2 行为"的定义。"""
     return not any(stage3_flags(settings).values())
+
+
+def stage6_flags(settings: Settings | None = None) -> dict[str, bool]:
+    """只返回阶段 6 的四个开关（`test-degradation` 的阶段 6 前提断言）。"""
+    target = settings or get_settings()
+    return {name: is_enabled(name, target) for name in STAGE6_FLAG_NAMES}
+
+
+def stage6_all_disabled(settings: Settings | None = None) -> bool:
+    """阶段 6 四个开关是否全部关闭 —— 即"阶段 5 行为"的定义。"""
+    return not any(stage6_flags(settings).values())

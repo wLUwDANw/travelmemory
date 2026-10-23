@@ -21,6 +21,9 @@ pydantic-settings>=2.3   # 从 .env 读取配置（见 app/core/config.py）
 # ---- 外部调用 ----
 httpx>=0.27              # 统一的网络出口：LLM / Embedding 都走 OpenAI 兼容协议
 
+# ---- 阶段 6：照片导入（W6-1）----
+Pillow>=10.0  # EXIF 解析（GPS / 拍摄时间）与缩略图生成；只用于本地导入链路
+
 # ---- 阶段 4：Agent 编排（W4-2）----
 # 只在 `AGENT_RUNTIME=graph` 时真正被 import。
 # 不装也不会让主流程挂掉：`app/agent/runtime.py` 捕获 ImportError 后

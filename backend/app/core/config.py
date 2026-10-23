@@ -192,8 +192,17 @@ class Settings(BaseSettings):
     minio_access_key: str = ""
     minio_secret_key: str = ""
 
-    # ---------------- 扩展开关（阶段 7，默认全关）----------------
+    # ---------------- 阶段 6 扩展开关（默认全关，PROJECT.md §二、[8]）----------------
+    #: W6-1 本地照片导入（EXIF 解析 + 内容指纹去重）
+    photo_import_enabled: bool = False
+    #: W6-2 行程自动聚类 + 地图相册
+    map_album_enabled: bool = False
+    #: W6-3 端能力抽象（原生相册 / 缩略图缓存 / 权限）
+    native_bridge_enabled: bool = False
+    #: W6-4 地理模糊（后端）+ 定向加密信物（前端）
     privacy_enabled: bool = False
+
+    # ---------------- 扩展开关（阶段 7，默认全关）----------------
     semantic_enabled: bool = False
     zk_enabled: bool = False
     chain_enabled: bool = False
