@@ -90,3 +90,36 @@ def gcj02_to_wgs84(lng: float, lat: float, *, iterations: int = 3) -> LngLat:
         cur_lng += lng - guessed.lng
         cur_lat += lat - guessed.lat
     return LngLat(round(cur_lng, 6), round(cur_lat, 6))
+
+
+#: IUGG 平均地球半径（公里）
+EARTH_RADIUS_KM = 6371.0088
+
+
+def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """两点间球面大圆距离（公里）。
+
+    ## 为什么是球面近似而不是椭球精确解
+
+    地球是个扁率约 1/298 的椭球，Vincenty / Karney 这类椭球解才"真正精确"。
+    但这里距离只用于**行程聚类的阈值判定**（默认 50km 量级）：
+    球面近似与椭球解在 50km 上的差异是**几十米**量级，
+    而手机相册里的 GPS 坐标本身就有**米到十几米**的误差，
+    EXIF 还经常只有 4~6 位小数（≈ 1~10 米）。
+
+    也就是说：**判定误差完全淹没在数据自身的噪声里**。
+    为它引入一个地理计算库（或自己实现 Vincenty 的迭代收敛与"近对跖点不收敛"处理）
+    换不来任何可观测的聚类结果变化，只增加依赖与调不通的风险。
+
+    真需要米级精度的地方（比如"这张照片在不在某个景点 200 米内"）
+    应该在 PostGIS 里用 geography 类型做，那里有正确的椭球与索引，不该在这里重算。
+    """
+    rad_lat1 = math.radians(lat1)
+    rad_lat2 = math.radians(lat2)
+    d_lat = rad_lat2 - rad_lat1
+    d_lng = math.radians(lng2 - lng1)
+
+    # haversine 的内层：纬度差与经度差（经度差按纬度收缩）合成的半正矢
+    h = math.sin(d_lat / 2) ** 2 + math.cos(rad_lat1) * math.cos(rad_lat2) * math.sin(d_lng / 2) ** 2
+    # 浮点误差会让 h 在两点重合时略微超过 1，asin 直接抛域错误 —— 夹一下
+    return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(min(1.0, max(0.0, h))))
