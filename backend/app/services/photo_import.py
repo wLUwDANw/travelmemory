@@ -28,6 +28,7 @@ import hashlib
 import io
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -394,7 +395,128 @@ async def import_photo(
     return photo, True
 
 
+@dataclass(frozen=True)
+class ImportedPhotoRecord:
+    """批量导入里的一张照片，以及它是不是本次新建的。
+
+    为什么要连"是否新建"一起返回：`imported` / `duplicates` 两个计数不能由
+    API 层再数一遍（数漏就是静默的账实不符），也不能让 API 层去比对对象身份
+    （`Photo` 没有可比的 `__eq__`）。把它作为结果的一部分产出，计数就只有一个来源。
+    """
+
+    photo: Photo
+    is_new: bool
+
+
+@dataclass(frozen=True)
+class BatchImportResult:
+    """一次批量导入的结果。
+
+    `records` **保持输入顺序**：API 层按这个顺序回 `photos`，
+    前端就能把响应里的第 n 项对上它上传的第 n 个文件。
+    换成"先新建后重复"的顺序，接口看起来更整齐，但响应与请求的位置对应关系就没了。
+    """
+
+    records: tuple[ImportedPhotoRecord, ...]
+    failed: int
+
+    @property
+    def imported(self) -> int:
+        """本次新建的条数（三个计数器之一，与另两个互斥且完备）。"""
+        return sum(1 for record in self.records if record.is_new)
+
+    @property
+    def duplicates(self) -> int:
+        """命中去重的条数（库里已有，或本批次内已经出现过）。"""
+        return sum(1 for record in self.records if not record.is_new)
+
+    @property
+    def photos(self) -> tuple[Photo, ...]:
+        """本次涉及的全部照片（含去重命中的旧记录），顺序与输入一致。"""
+        return tuple(record.photo for record in self.records)
+
+
+async def import_photo_batch(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    payloads: Sequence[bytes],
+    platform: str = "web",
+) -> BatchImportResult:
+    """批量导入照片字节（**不清空、不删除任何既有数据**）。
+
+    ## 为什么解析失败只计数不抛出
+
+    一批 200 张里混着 30 张截图和损坏文件是常态。若第一张失败就整批抛出，
+    用户就永远导不完那剩下的 170 张 —— 而他已经等了这次上传的全部时间。
+    所以单张失败**就地记一笔 warning 并计入 `failed`**，整批继续。
+    失败的细节进日志（按指纹前缀定位），响应的体积留给数量。
+
+    ## 为什么去重要查两处（库里 + 本批次内）
+
+    只查库里会漏掉"同一批次里放了两份"：第二份在 flush 之前库里查不到，
+    插入时会在 `unique(platform, asset_id)` 上撞车，把整批事务炸掉 ——
+    用户上传了两个同名文件，结果是 500，而不只是少导一张。
+    所以本批次内已插入的指纹也要记一笔。
+
+    ## 为什么既有记录的查询是**一次**而不是每张一次
+
+    批量导入的往返次数必须是 O(1) 而不是 O(N)：一次
+    `WHERE user_id = ? AND hash IN (...)` 拿全部已有行，
+    再在 Python 里做字典查找。N 张照片 N 次往返在几千张的量级上
+    会把导入时间从秒级拖到分钟级。
+
+    Raises:
+        PhotoImportError: `photo_import` 开关关闭。
+    """
+    if not is_enabled("photo_import"):
+        raise PhotoImportError("照片导入功能未启用（PHOTO_IMPORT_ENABLED=true 可开启）")
+
+    # ------------------------------------------------------------ 逐张解析
+    metas: list[PhotoMeta] = []
+    failed = 0
+    for payload in payloads:
+        try:
+            metas.append(parse_exif(payload))
+        except PhotoImportError as exc:
+            failed += 1
+            logger.warning("照片解析失败，已跳过：%s", exc)
+
+    # ------------------------------------------------ 一次查出库里已有的行
+    existing: dict[str, Photo] = {}
+    fingerprints = [meta.sha256 for meta in metas]
+    if fingerprints:
+        rows = (
+            await session.execute(
+                select(Photo).where(
+                    Photo.user_id == user_id, Photo.hash.in_(fingerprints)
+                )
+            )
+        ).scalars().all()
+        existing = {row.hash: row for row in rows if row.hash is not None}
+
+    # ---------------------------------------------------------- 去重后插入
+    records: list[ImportedPhotoRecord] = []
+    inserted: dict[str, Photo] = {}
+    for meta in metas:
+        hit = existing.get(meta.sha256) or inserted.get(meta.sha256)
+        if hit is not None:
+            records.append(ImportedPhotoRecord(photo=hit, is_new=False))
+            continue
+        photo = to_photo_record(user_id, meta, platform=platform, asset_id=meta.sha256)
+        session.add(photo)
+        inserted[meta.sha256] = photo
+        records.append(ImportedPhotoRecord(photo=photo, is_new=True))
+
+    if inserted:
+        # 一次 flush 拿全部 id，而不是每张 flush 一次
+        await session.flush()
+
+    return BatchImportResult(records=tuple(records), failed=failed)
+
+
 __all__ = [
+    "BatchImportResult",
     "COORD_SYSTEM_WGS84",
     "LOCATION_CONFIDENCE_EXIF",
     "LOCATION_CONFIDENCE_NONE",
@@ -402,9 +524,11 @@ __all__ = [
     "LOCATION_SOURCE_NONE",
     "TZ_SOURCE_EXIF",
     "TZ_SOURCE_UNKNOWN",
+    "ImportedPhotoRecord",
     "PhotoImportError",
     "PhotoMeta",
     "import_photo",
+    "import_photo_batch",
     "parse_exif",
     "read_photo",
     "sha256_bytes",

@@ -12,6 +12,7 @@ from app.models.jobs import IngestJob
 from app.models.memory import MemoryItem, MemorySource
 from app.models.photo import Photo
 from app.models.traces import AgentRun, AgentStep, ToolCallLog
+from app.models.trip import Trip, TripItem
 from app.models.user import User
 
 __all__ = [
@@ -26,5 +27,7 @@ __all__ = [
     "MemorySource",
     "Photo",
     "ToolCallLog",
+    "Trip",
+    "TripItem",
     "User",
 ]

@@ -23,6 +23,9 @@ httpx>=0.27              # 统一的网络出口：LLM / Embedding 都走 OpenAI
 
 # ---- 阶段 6：照片导入（W6-1）----
 Pillow>=10.0  # EXIF 解析（GPS / 拍摄时间）与缩略图生成；只用于本地导入链路
+python-multipart>=0.0.9  # FastAPI 解析 multipart/form-data 的必需依赖：
+                         # 没有它，`POST /api/v1/photos/import`（files 字段可重复）会直接
+                         # 抛 "Form data requires python-multipart"，且报错发生在进入 handler 之前
 
 # ---- 阶段 4：Agent 编排（W4-2）----
 # 只在 `AGENT_RUNTIME=graph` 时真正被 import。

@@ -1,0 +1,250 @@
+"""行程（Trip）的**落库与重建**（阶段 6 W6-2 的 IO 部分）。
+
+## 算法与 IO 为什么要分家
+
+`trip_cluster.py` 是纯函数：给它一组时间与坐标，它切出几趟，不碰数据库。
+本模块只做它做不了的三件事 —— 取照片、把结果写进 `Trip` / `TripItem`、
+按读取路径把结果取回来。
+
+分家的收益是**可测试性**：切分的对与错由 `tests/test_trip_cluster.py` 在离线
+钉死，本模块只需要测"读写有没有把算法的结果如实搬进库"。
+混在一起的话，任何一条切分断言都得先连数据库。
+
+## 为什么"先删后插"是安全的（本模块最重要的一条论证）
+
+`Trip` / `TripItem` 是**派生表**：每一行的全部内容都能由 `Photo` 表在几秒内
+重算出来（`models/trip.py` 的模块 docstring 有完整论证）。于是：
+
+  - 重建 = 用当前照片集把同一个函数再跑一遍，**结果只由照片决定**；
+  - 对同一批照片跑 N 次，得到的行程边界、簇内顺序、每簇照片数完全相同
+    （只有 `id` 会变，因为主键由数据库生成）；
+  - 因此删掉旧行不会造成"暂时看不到行程"以外的任何损失 —— 而这段窗口
+    在同一次请求、同一个事务里，外部根本观察不到。
+
+反过来，`Photo` 是数据源，**重建逻辑绝不删它**：本模块除了 `select` 之外
+对 `photo` 表没有任何写操作（`rebuild_user_trips` 里删的两张表都姓 trip）。
+这条纪律一旦破掉，"重跑一次聚类"就会变成"照片全没了"，那是不可恢复的事故。
+
+## 为什么每个用户各自重建，而不是全表重建
+
+重建的作用域是**一个用户**：行程归属用户，A 用户重新导入照片时没有理由
+（也没有理由让）B 用户的行程跟着删一遍再插一遍。
+按 `user_id` 收窄还有个直接的工程收益：删改范围与事务时长都只跟一个人的
+照片量有关，不会因为某个用户导了两万张照片而把别人的请求拖慢。
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.photo import Photo
+from app.models.trip import TRIP_SOURCE_CLUSTER, Trip, TripItem
+from app.services.semantic_service import classify_place
+from app.services.trip_cluster import ClusterConfig, cluster_trips_from_photos
+
+
+@dataclass(frozen=True)
+class TripItemSnapshot:
+    """一行 `TripItem` 加上它指向的 `Photo`。
+
+    为什么要连 `Photo` 一起带出来：视图要给照片算语义标签，而标签的证据
+    （`caption` / `ai_tags`）只存在于 `Photo` 上。一次查询把两样都取回来，
+    读取路径才是**两次**查询（trips + items）而不是每行程一次。
+
+    `photo` 允许为 None：照片理论上可能已被物理删除，
+    而行程视图不该因为少一行就整趟不显示。
+    """
+
+    item: TripItem
+    photo: Photo | None
+
+
+@dataclass(frozen=True)
+class TripSnapshot:
+    """一段行程 + 它的全部条目（已按 `ord` 排好）。"""
+
+    trip: Trip
+    items: tuple[TripItemSnapshot, ...]
+
+
+def semantic_tag_for_photo(photo: Photo | None) -> tuple[str | None, str | None]:
+    """取一张照片的 `(语义标签, 中文名)`；无论据时为 `(None, None)`。
+
+    用**未门控**的 `classify_place` 而不是 `semantic_tag_for_place`：
+    后者受 `semantic` 开关控制、只返回 tag 不返回 label；而这里要的是展示用的
+    `(tag, label)` 二元组，且 `classify_place` 是纯函数 —— 无 IO、无模型调用、
+    无法命中时就交出 None。开关关着时两者都会给出 None，行为完全一致，
+    所以没必要为了"看起来守规矩"去接一个会丢掉 label 的门控版。
+
+    **导入那一刻它必然返回 (None, None)**：照片刚入库，还没有 caption
+    （caption 由离线批处理 `jobs/caption_job` 补）。这是诚实的答案 ——
+    猜一个标签写进阶段 7 的模式库，比少一条数据糟得多。
+    """
+    if photo is None:
+        return (None, None)
+    result = classify_place(ai_tags=photo.ai_tags, name=photo.caption)
+    return (result.tag, result.label)
+
+
+def _trip_title(
+    cluster_start_photo_id: str,
+    cluster_started_at: datetime,
+    local_by_photo: dict[str, datetime | None],
+) -> str:
+    """行程标题：形如「2026-04-12 起的旅程」。
+
+    日期取自簇内最早一张的 `taken_at_local`（**当地时间**）而不是 `started_at`（UTC）：
+    EXIF 没记录时区时，`taken_at` 是把当地墙钟当 UTC 存的退化值
+    （见 `services/photo_import.py` 的取舍说明），它与 `taken_at_local` 的日期相同；
+    记录了时区时，只有 `taken_at_local` 才是用户心里的"那天"。
+
+    `taken_at_local` 缺失时才退回 `started_at`：宁可给一个可能差几个小时的日期，
+    也不给一个空标题 —— 标题缺失会让 UI 出现一个没有名字的行程卡片。
+    """
+    local = local_by_photo.get(cluster_start_photo_id)
+    moment = local if local is not None else cluster_started_at
+    return f"{moment.date().isoformat()} 起的旅程"
+
+
+async def _delete_user_trips(session: AsyncSession, *, user_id: uuid.UUID) -> None:
+    """删掉该用户的全部行程（**只删 trip / trip_item，绝不碰 photo**）。
+
+    为什么显式删 `trip_item` 而不是依赖外键的 ON DELETE CASCADE：
+    级联是数据库的行为，而"重建会连带清掉条目"这句话应该由代码说出来。
+    万一有人用 `create_all` 建了一张没有级联的表，依赖级联就会留下孤儿行，
+    而且这种脏数据**不报错**，只在行程详情里表现为"照片数对不上"。
+    """
+    trip_ids = select(Trip.id).where(Trip.user_id == user_id)
+    await session.execute(delete(TripItem).where(TripItem.trip_id.in_(trip_ids)))
+    await session.execute(delete(Trip).where(Trip.user_id == user_id))
+    await session.flush()
+
+
+async def rebuild_user_trips(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    config: ClusterConfig | None = None,
+) -> list[Trip]:
+    """用该用户当前的全部照片**重建**他的行程（幂等）。
+
+    流程固定四步：删旧的 → 取照片 → 聚类 → 落库。
+    `Photo` 表全程只读：它是数据源，重建无论如何都不许动它。
+
+    返回新建的 `Trip` 列表（按时间先后）。用户一张照片都没有时返回 `[]`
+    （此时他也没有任何行程 —— 有照片才谈得上行程）。
+
+    没有照片时不清空旧行程吗？**会清空**。照片被删到一张不剩，行程也就
+    失去了存在的依据；留着它们的结果是"能看到行程但点进去是空的"，
+    不如让视图与数据源保持一致。
+    """
+    await _delete_user_trips(session, user_id=user_id)
+
+    photos = (
+        await session.execute(
+            select(Photo).where(Photo.user_id == user_id, Photo.deleted_at.is_(None))
+        )
+    ).scalars().all()
+
+    clusters = cluster_trips_from_photos(photos, config)
+
+    # 标题要用当地时间，而 `ClusterItem` 只带 UTC —— 这里补一张 id → 当地的映射
+    local_by_photo = {str(photo.id): photo.taken_at_local for photo in photos}
+
+    trips: list[Trip] = []
+    for cluster in clusters:
+        trip = Trip(
+            user_id=user_id,
+            title=_trip_title(cluster.items[0].photo_id, cluster.started_at, local_by_photo),
+            started_at=cluster.started_at,
+            ended_at=cluster.ended_at,
+            source=TRIP_SOURCE_CLUSTER,
+        )
+        session.add(trip)
+        # flush 拿 id：下面每条 TripItem 都要引用它
+        await session.flush()
+
+        for position, item in enumerate(cluster.items):
+            session.add(
+                TripItem(
+                    trip_id=trip.id,
+                    photo_id=uuid.UUID(item.photo_id),
+                    taken_at=item.taken_at,
+                    lat=item.lat,
+                    lng=item.lng,
+                    ord=position,
+                )
+            )
+        trips.append(trip)
+
+    if trips:
+        await session.flush()
+    return trips
+
+
+async def list_user_trips(
+    session: AsyncSession, *, user_id: uuid.UUID
+) -> list[TripSnapshot]:
+    """取该用户的全部行程（按 `started_at` 升序）及各自行程条目。
+
+    两次查询（trips + items + photos 合成两次）：行程数与照片数都可能有几十条，
+    每条一次查询就是典型的 N+1，在地图相册打开一次要几十个往返。
+
+    `items` 的顺序由 `ord` 保证而不是由数据库行序保证：
+    行序没有语义，同一趟的条目换个顺序就是一条乱掉的行程路线。
+    """
+    trips = (
+        await session.execute(
+            select(Trip)
+            .where(Trip.user_id == user_id)
+            .order_by(Trip.started_at.asc().nulls_last(), Trip.id.asc())
+        )
+    ).scalars().all()
+    if not trips:
+        return []
+
+    trip_ids = [trip.id for trip in trips]
+    rows: Sequence[TripItem] = (
+        await session.execute(
+            select(TripItem)
+            .where(TripItem.trip_id.in_(trip_ids))
+            .order_by(TripItem.trip_id.asc(), TripItem.ord.asc())
+        )
+    ).scalars().all()
+
+    photos = await _photos_by_id(session, [row.photo_id for row in rows])
+
+    grouped: dict[uuid.UUID, list[TripItemSnapshot]] = {trip.id: [] for trip in trips}
+    for row in rows:
+        grouped[row.trip_id].append(TripItemSnapshot(item=row, photo=photos.get(row.photo_id)))
+
+    return [
+        TripSnapshot(trip=trip, items=tuple(grouped[trip.id])) for trip in trips
+    ]
+
+
+async def _photos_by_id(
+    session: AsyncSession, photo_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, Photo]:
+    """批量取照片（一次 IN 查询）。空 id 列表直接返回空字典，不发起查询。"""
+    if not photo_ids:
+        return {}
+    rows = (
+        await session.execute(select(Photo).where(Photo.id.in_(set(photo_ids))))
+    ).scalars().all()
+    return {row.id: row for row in rows}
+
+
+__all__ = [
+    "TripItemSnapshot",
+    "TripSnapshot",
+    "list_user_trips",
+    "rebuild_user_trips",
+    "semantic_tag_for_photo",
+]
