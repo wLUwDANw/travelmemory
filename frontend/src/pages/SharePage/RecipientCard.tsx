@@ -25,6 +25,7 @@ import {
 } from '../../components/ui/card';
 import { Checkbox } from '../../components/ui/checkbox';
 import { Label } from '../../components/ui/label';
+import { TAG_LABELS, type Tag } from '../../types/share';
 import type { Friend } from './friends';
 
 export interface RecipientCardProps {
@@ -39,6 +40,8 @@ export interface RecipientCardProps {
   onGenerate: () => void;
   /** 上一轮打包的降级记录（地理模糊失败的地点）。没有就传 null。 */
   warnings: string[];
+  /** 这份旅程用到的语义标签（已按六类校验过）。展示用，让发送方在打包前看清分类。 */
+  semanticTags?: Tag[];
 }
 
 export function RecipientCard({
@@ -52,6 +55,7 @@ export function RecipientCard({
   generating,
   onGenerate,
   warnings,
+  semanticTags,
 }: RecipientCardProps) {
   return (
     <Card>
@@ -121,6 +125,25 @@ export function RecipientCard({
             {warnings.map((warning) => (
               <p key={warning}>{warning}</p>
             ))}
+          </div>
+        )}
+
+        {semanticTags && semanticTags.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              语义标签
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {semanticTags.map((tag) => (
+                <Badge key={tag} variant="secure">
+                  {TAG_LABELS[tag]}
+                </Badge>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              分类随信物一起打包（它是明文，参与承诺校验）。分类算法在后端语义服务，
+              前端只做六类校验与保底。
+            </p>
           </div>
         )}
 

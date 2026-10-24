@@ -38,7 +38,7 @@ import { obfuscateLocation } from '../../services/api/privacy';
 import { prepareShare } from '../../services/share/prepare';
 import { SHARE_FILE_EXTENSION } from '../../services/share/schema';
 import { unpackForViewer } from '../../services/share/unpack';
-import type { UnpackedPlace, UnpackViewerResult } from '../../types/share';
+import type { Tag, Trip, UnpackedPlace, UnpackViewerResult } from '../../types/share';
 import { demoTrip, demoVisibility } from './demoTrip';
 import { FriendsCard } from './FriendsCard';
 import { IdentityCard } from './IdentityCard';
@@ -46,6 +46,32 @@ import { ImportCard } from './ImportCard';
 import { clearIdentity, loadOrCreateIdentity } from './identity';
 import { listFriends, type Friend } from './friends';
 import { RecipientCard } from './RecipientCard';
+import {
+  ALL_SEMANTIC_TAGS,
+  FALLBACK_SEMANTIC_TAG,
+  normalizeSemanticTag,
+} from './semanticTags';
+import { VerifyCard } from './VerifyCard';
+
+/** 把示例旅程每个地点的 `tag` 过一遍语义标签校验（W7-1 前端部分）。
+ *
+ * **本次不改动分享协议**：`Place.tag` 本来就在协议里（`EncryptedPlace.tag` 是明文、
+ * 且参与承诺），这里只是确保它一定是六类之一 —— 后端语义服务给出的标签有时会是
+ * 新词或 `None`，直接打进包里会让收件人侧的分类渲染与承诺比对出现意外值。
+ * 分类算法本身在后端 `semantic_service.py`，前端不复算，只做校验与保底。
+ */
+function withNormalizedTags(trip: Trip): Trip {
+  return {
+    ...trip,
+    days: trip.days.map((day) => ({
+      ...day,
+      places: day.places.map((place) => ({
+        ...place,
+        tag: normalizeSemanticTag(place.tag) ?? FALLBACK_SEMANTIC_TAG,
+      })),
+    })),
+  };
+}
 
 export interface SharePageProps {
   /** 「在地图上查看」：把解出的地点交给地图页渲染模糊圈。 */
@@ -89,6 +115,19 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
     return selfSelected ? [identity.pubkey, ...friendKeys] : friendKeys;
   }, [friends, identity.pubkey, selectedFriendIds, selfSelected]);
 
+  /** 示例旅程 + 语义标签校验（W7-1）。生成与展示共用同一份，避免"显示的标签"和
+   *  "打包进去的标签"不一致。 */
+  const normalizedTrip = useMemo(() => withNormalizedTags(demoTrip()), []);
+
+  /** 这份旅程用到的语义标签，按 `ALL_SEMANTIC_TAGS` 顺序去重后展示。 */
+  const semanticTags = useMemo<Tag[]>(() => {
+    const seen = new Set<Tag>();
+    for (const day of normalizedTrip.days) {
+      for (const place of day.places) seen.add(place.tag);
+    }
+    return ALL_SEMANTIC_TAGS.filter((tag) => seen.has(tag));
+  }, [normalizedTrip]);
+
   /** 通讯录变了就重读，并顺手把已经不存在的好友从勾选里摘掉
    *  （留着一个幽灵 id 会让"勾选人数"和实际收件人对不上）。 */
   const refreshFriends = useCallback(() => {
@@ -111,7 +150,8 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
         {
           groups: [
             {
-              trip: demoTrip(),
+              // 语义标签已经过 normalizeSemanticTag 校验（W7-1 前端部分）
+              trip: normalizedTrip,
               visibility: demoVisibility(),
               recipientPubkeys,
             },
@@ -140,7 +180,7 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
     } finally {
       setGenerating(false);
     }
-  }, [identity, recipientPubkeys]);
+  }, [identity, normalizedTrip, recipientPubkeys]);
 
   const importFile = useCallback(
     async (file: File) => {
@@ -206,6 +246,7 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
         generating={generating}
         onGenerate={() => void generate()}
         warnings={warnings}
+        semanticTags={semanticTags}
       />
 
       <ImportCard
@@ -214,6 +255,12 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
         view={view}
         onFile={(file) => void importFile(file)}
         onViewOnMap={onViewOnMap}
+      />
+
+      {/* W7-3：可验证断言。与导入区共用同一份解包结论，所以两者不会给出矛盾的判断。 */}
+      <VerifyCard
+        cred={{ privHex: identity.privHex }}
+        externalResult={view}
       />
     </div>
   );
