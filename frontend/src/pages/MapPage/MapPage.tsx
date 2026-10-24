@@ -6,17 +6,21 @@
  * - 渲染分享信物解出的地点：`radius > 0` → 半透明模糊圈，否则 Marker。
  *   这条红线由 `layers.ts` + `layers.test.ts` 锁死，本页只是把结果交给
  *   `MapCanvas` 执行；
- * - 左上角悬浮操作面板：新建旅程 / 导入照片（入口已就位，功能占位）+ 图层开关；
+ * - 渲染「我的照片」图层：后端 `GET /api/v1/trips` 回来的行程里有坐标的照片，
+ *   由 `tripPoints.ts` 折成 `MapPointInput` 后追加进同一份渲染计划；
+ * - 左上角悬浮操作面板：新建旅程（如实说明后端暂无写入接口）+ 导入照片（真实
+ *   file input → 上传 → 缩略图入库）+ 图层开关；
  * - 空态 / 降级态（key 没配、脚本没加载）由 `MapCanvas` 自己渲染，本页不接管。
  *
  * 不做（留给人类 / 后续阶段）：
- * - 本机照片图层的数据接入（`layers.ts` 的 `source: 'photo'` 分支已就位，接上即用）；
- * - 60fps 聚合渲染、视口裁剪、轨迹回放 —— 见 `docs/stages/stage6-map-album.md`。
+ * - 60fps 聚合渲染、视口裁剪、轨迹回放 —— 见 `docs/stages/stage6-map-album.md`；
+ * - 行程的手工编辑（后端还没有写入接口，见 `CreateTripDialog`）。
  */
 
 import { useMemo, useState } from 'react';
 import { CircleDot, Info, Map as MapIcon } from 'lucide-react';
 
+import type { TripView } from '../../services/api/trips';
 import type { UnpackedPlace } from '../../types/share';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
 import { Badge } from '../../components/ui/badge';
@@ -29,23 +33,34 @@ import {
   toggleLayer,
   type LayerVisibility,
 } from './layers';
+import { countTripPhotos, tripPointsFromTrips } from './tripPoints';
 
 export interface MapPageProps {
   /** 信物解包结果里的全部地点（已过验签）。坐标是 WGS84（模糊后）。 */
   sharePlaces?: readonly UnpackedPlace[];
+  /** 后端行程列表。每个 item 里带坐标的会进「我的照片」图层。 */
+  trips?: readonly TripView[];
+  /** 导入成功后通知上层重新拉行程列表。 */
+  onTripsChanged?: () => void;
 }
 
 /** 高德 JS API key。前端 key 会被打进产物，靠 referer 白名单保护，不当机密。 */
 const AMAP_JS_KEY = import.meta.env.VITE_AMAP_JS_KEY ?? '';
 const AMAP_SECURITY_CODE = import.meta.env.VITE_AMAP_SECURITY_CODE ?? '';
 
-export function MapPage({ sharePlaces = [] }: MapPageProps) {
+export function MapPage({ sharePlaces = [], trips = [], onTripsChanged }: MapPageProps) {
   const [visibility, setVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
 
-  const points = useMemo(() => sharePointsFromPlaces(sharePlaces), [sharePlaces]);
+  // 两个数据源拼成一份点列表：图层开关与渲染计划都只认 `MapPointInput`，
+  // 所以"合流"发生在这一层，layers.ts 不需要知道行程是什么。
+  const points = useMemo(
+    () => [...sharePointsFromPlaces(sharePlaces), ...tripPointsFromTrips(trips)],
+    [sharePlaces, trips],
+  );
   // 可见点数 / 已隐藏点数都来自纯逻辑层，UI 不自己数一遍
   const plan = useMemo(() => planMapRender(points, visibility), [points, visibility]);
   const shareCount = useMemo(() => points.filter((p) => p.source === 'share').length, [points]);
+  const photoCounts = useMemo(() => countTripPhotos(trips), [trips]);
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -76,6 +91,9 @@ export function MapPage({ sharePlaces = [] }: MapPageProps) {
           visibility={visibility}
           onToggleLayer={(layer) => setVisibility((v) => toggleLayer(v, layer))}
           shareCount={shareCount}
+          photoCount={photoCounts.onMap}
+          photoTotal={photoCounts.total}
+          onTripsChanged={onTripsChanged}
         />
         <MapCanvas points={points} jsKey={AMAP_JS_KEY} securityCode={AMAP_SECURITY_CODE} />
       </div>

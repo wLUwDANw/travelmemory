@@ -12,6 +12,7 @@
  * 生成出来再让用户发现是浪费一次下载。
  */
 
+import type { ReactNode } from 'react';
 import { Download, Loader2, Send } from 'lucide-react';
 
 import { Badge } from '../../components/ui/badge';
@@ -29,6 +30,13 @@ import { TAG_LABELS, type Tag } from '../../types/share';
 import type { Friend } from './friends';
 
 export interface RecipientCardProps {
+  /** 标题后面的那枚 Badge：标明这一包来自示例数据还是用户导入的照片。
+   *  写死成"内置示例"会让"我导入的照片"打出来的包带着一句假话。 */
+  tripLabel: string;
+  /** 标题下的说明。随来源变化 —— 见 `tripLabel` 同样的理由。 */
+  sourceNote: string;
+  /** 行程来源选择器（由 SharePage 传入，状态留在那一层）。 */
+  tripSource?: ReactNode;
   selfSelected: boolean;
   onToggleSelf: (next: boolean) => void;
   selfLabel: string;
@@ -45,6 +53,9 @@ export interface RecipientCardProps {
 }
 
 export function RecipientCard({
+  tripLabel,
+  sourceNote,
+  tripSource,
   selfSelected,
   onToggleSelf,
   selfLabel,
@@ -63,14 +74,13 @@ export function RecipientCard({
         <CardTitle className="flex items-center gap-2 text-base">
           <Send className="h-5 w-5 text-primary" />
           生成信物
-          <Badge variant="secondary">内置示例旅程</Badge>
+          <Badge variant="secondary">{tripLabel}</Badge>
         </CardTitle>
-        <CardDescription>
-          用内置的洛阳两日示例打包：地点坐标会先做地理模糊，只有被勾选的收件人能解开。
-        </CardDescription>
+        <CardDescription>{sourceNote}</CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {tripSource}
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">收件人</p>
 

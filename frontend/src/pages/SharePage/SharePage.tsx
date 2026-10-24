@@ -34,13 +34,18 @@ import { useCallback, useMemo, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 
 import { Badge } from '../../components/ui/badge';
+import { Label } from '../../components/ui/label';
 import { toast } from '../../components/ui/use-toast';
 import { obfuscateLocation } from '../../services/api/privacy';
+import type { TripView } from '../../services/api/trips';
+import { resolveNativeBridge } from '../../services/native';
+import { emptyVisibility } from '../../services/share/filter';
 import { prepareShare } from '../../services/share/prepare';
 import { SHARE_FILE_EXTENSION } from '../../services/share/schema';
 import { unpackForViewer } from '../../services/share/unpack';
 import type { Tag, Trip, UnpackedPlace, UnpackViewerResult } from '../../types/share';
 import { demoTrip, demoVisibility } from './demoTrip';
+import { hydrateTripPhotos, tripViewToTrip } from './tripSource';
 import { FriendsCard } from './FriendsCard';
 import { IdentityCard } from './IdentityCard';
 import { ImportCard } from './ImportCard';
@@ -74,9 +79,51 @@ function withNormalizedTags(trip: Trip): Trip {
   };
 }
 
+/** 行程来源选择器的"内置示例"这一项的值。 */
+export const DEMO_TRIP_OPTION = '__demo__';
+
 export interface SharePageProps {
   /** 「在地图上查看」：把解出的地点交给地图页渲染模糊圈。 */
   onViewOnMap?: (places: UnpackedPlace[]) => void;
+  /** 后端行程列表（导入照片后由后端聚类出来）。不传则只有内置示例可选。 */
+  trips?: readonly TripView[];
+}
+
+/** 行程来源选择器：默认优先用新建（导入出来的）行程，没有才回落到内置示例。 */
+function TripSourceSelect({
+  trips,
+  value,
+  onChange,
+}: {
+  trips: readonly TripView[];
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor="trip-source" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        旅程来源
+      </Label>
+      <select
+        id="trip-source"
+        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value={DEMO_TRIP_OPTION}>内置示例旅程（洛阳两日）</option>
+        {trips.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.title || '未命名旅程'}（{item.itemCount} 张 · {item.source === 'manual' ? '手工' : '自动聚类'}）
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-muted-foreground">
+        {value === DEMO_TRIP_OPTION
+          ? '示例数据是写死的，用来验证打包链路。'
+          : '来自后端行程：照片字节取本机缩略图缓存，坐标仍会先做地理模糊。'}
+      </p>
+    </div>
+  );
 }
 
 /** 把包落成文件下载。`Blob` + 临时 `<a>` 是最省事也最稳的一条路；
@@ -93,10 +140,19 @@ function downloadShareFile(pkg: unknown, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function SharePage({ onViewOnMap }: SharePageProps) {
+export function SharePage({ onViewOnMap, trips = [] }: SharePageProps) {
   // 惰性初始化：localStorage 同步读，useState 初始函数只跑一次（StrictMode 双跑也安全）
   const [identity, setIdentity] = useState<ReturnType<typeof loadOrCreateIdentity>>(() => loadOrCreateIdentity());
   const [friends, setFriends] = useState<Friend[]>(() => listFriends());
+
+  // null = 还没手动选过，跟着"有真实行程就用真实行程"的默认值走
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+  const effectiveTripId = selectedTripId ?? (trips.length > 0 ? trips[0].id : DEMO_TRIP_OPTION);
+  const selectedTrip = useMemo(
+    () => trips.find((item) => item.id === effectiveTripId) ?? null,
+    [trips, effectiveTripId],
+  );
+  const usingDemo = selectedTrip === null;
 
   // 自己默认在收件人里（不信 "写死"，用户可以取消）
   const [selfSelected, setSelfSelected] = useState(true);
@@ -116,9 +172,22 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
     return selfSelected ? [identity.pubkey, ...friendKeys] : friendKeys;
   }, [friends, identity.pubkey, selectedFriendIds, selfSelected]);
 
-  /** 示例旅程 + 语义标签校验（W7-1）。生成与展示共用同一份，避免"显示的标签"和
-   *  "打包进去的标签"不一致。 */
-  const normalizedTrip = useMemo(() => withNormalizedTags(demoTrip()), []);
+  /** 当前选中的旅程 + 语义标签校验（W7-1）。生成与展示共用同一份，避免"显示的标签"和
+   *  "打包进去的标签"不一致。
+   *
+   *  真实行程由 `tripViewToTrip` 折出来：标签已经在里面退回过 `leisure`，
+   *  这里再过一遍 `withNormalizedTags` 是为了让两个来源的保底规则完全一致。 */
+  const normalizedTrip = useMemo(
+    () => withNormalizedTags(selectedTrip ? tripViewToTrip(selectedTrip) : demoTrip()),
+    [selectedTrip],
+  );
+
+  /** 可见性：示例用自己的那份（tripId 写死 `t_demo0001`），真实行程用空可见性
+   *  （tripId 必须跟着行程 id 变，否则将来按 tripId 查记录会查到别人头上）。 */
+  const visibility = useMemo(
+    () => (usingDemo ? demoVisibility() : emptyVisibility(normalizedTrip.id, 'g1')),
+    [usingDemo, normalizedTrip.id],
+  );
 
   /** 这份旅程用到的语义标签，按 `ALL_SEMANTIC_TAGS` 顺序去重后展示。 */
   const semanticTags = useMemo<Tag[]>(() => {
@@ -147,13 +216,26 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
     setGenerating(true);
     setWarnings([]);
     try {
+      // 真实行程的照片字节在 `tripViewToTrip` 里是空的占位，打包前用本机缩略图缓存填上。
+      // 取不到字节的地点会被丢掉（pack 拒绝 0 字节照片），数量进 warnings 让用户看见。
+      let trip = normalizedTrip;
+      let droppedPlaces = 0;
+      if (!usingDemo) {
+        const hydrated = await hydrateTripPhotos(normalizedTrip, resolveNativeBridge().thumbs);
+        trip = hydrated.trip;
+        droppedPlaces = hydrated.droppedPlaces;
+        if (trip.days.length === 0) {
+          throw new Error('本机没有这些照片的缩略图，请在「地图相册」重新导入照片后再生成');
+        }
+      }
+
       const result = await prepareShare(
         {
           groups: [
             {
               // 语义标签已经过 normalizeSemanticTag 校验（W7-1 前端部分）
-              trip: normalizedTrip,
-              visibility: demoVisibility(),
+              trip,
+              visibility,
               recipientPubkeys,
             },
           ],
@@ -165,7 +247,11 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
       );
 
       downloadShareFile(result.pkg, `${result.pkg.shareId}${SHARE_FILE_EXTENSION}`);
-      setWarnings(result.warnings);
+      setWarnings(
+        droppedPlaces > 0
+          ? [...result.warnings, `有 ${droppedPlaces} 个地点缺少本机缩略图，未打包进去`]
+          : result.warnings,
+      );
       toast({
         variant: 'success',
         title: '信物已生成',
@@ -181,7 +267,7 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
     } finally {
       setGenerating(false);
     }
-  }, [identity, normalizedTrip, recipientPubkeys]);
+  }, [identity, normalizedTrip, usingDemo, recipientPubkeys, visibility]);
 
   const importFile = useCallback(
     async (file: File) => {
@@ -237,6 +323,19 @@ export function SharePage({ onViewOnMap }: SharePageProps) {
       />
 
       <RecipientCard
+        tripLabel={usingDemo ? '内置示例旅程' : '我导入的照片'}
+        sourceNote={
+          usingDemo
+            ? '用内置的洛阳两日示例打包：地点坐标会先做地理模糊，只有被勾选的收件人能解开。'
+            : `打包后端行程「${normalizedTrip.title}」：照片字节取本机缩略图缓存，坐标先做地理模糊。`
+        }
+        tripSource={
+          <TripSourceSelect
+            trips={trips}
+            value={effectiveTripId}
+            onChange={setSelectedTripId}
+          />
+        }
         selfSelected={selfSelected}
         onToggleSelf={setSelfSelected}
         selfLabel={`指纹 ${identity.pubHex.slice(0, 8)}`}

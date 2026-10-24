@@ -119,6 +119,22 @@ export function createWebPhotoSource(): PhotoSource {
   return {
     platform: 'web',
 
+    /** 把页面已有的 `File[]` 并入当前批次。
+     *
+     * 与 `pickPhotos` 的唯一差别是"文件从哪来"，入池逻辑完全复用 `remember`，
+     * 所以 `readThumb` 之后照样能按 assetId 找回原始像素。
+     *
+     * 刻意**不在这里解尺寸**（`fillSize`）：`adoptFiles` 是同步的，而
+     * `createImageBitmap` 必须 await。导入链路只需要 `readThumb`（它自己会解码），
+     * 为了一个没人读的 width/height 去把整批图解码一遍是纯浪费。
+     */
+    adoptFiles(files: readonly File[]): PhotoAsset[] {
+      return files
+        .map(remember)
+        .filter((entry): entry is { asset: PhotoAsset; file: File } => entry !== null)
+        .map((entry) => entry.asset);
+    },
+
     async pickPhotos(options?: PickPhotosOptions): Promise<PhotoAsset[]> {
       requireDom('pickPhotos');
 
@@ -208,6 +224,12 @@ export function createNativePhotoSource(): PhotoSource {
       throw new Error(NOT_READY);
     },
     async readThumb(_assetId: string, _maxEdge?: number): Promise<ArrayBuffer> {
+      throw new Error(NOT_READY);
+    },
+    /** 原生端没有 `File`：真机上应由桥接层把平台 asset 标识符直接交给业务，
+     *  走不到这个"先有 File 再换 asset"的反向路径。抛错而不是静默返回空数组，
+     *  跟本桩其余方法的取向一致。 */
+    adoptFiles(_files: readonly File[]): PhotoAsset[] {
       throw new Error(NOT_READY);
     },
   };

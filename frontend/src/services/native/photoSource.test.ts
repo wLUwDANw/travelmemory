@@ -23,6 +23,30 @@ describe('createWebPhotoSource', () => {
     // 这里仍然会因为没有 document 失败，但说明签名层面 limit 是可选的
     await expect(createWebPhotoSource().pickPhotos({ limit: 5 })).rejects.toThrow(/浏览器环境/);
   });
+
+  it('adoptFiles 把已有的 File[] 换成同序 assets，非图片被剔除', () => {
+    const files = [
+      new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' }),
+      new File([new Uint8Array([2])], 'b.png', { type: 'image/png' }),
+      new File([new Uint8Array([3])], 'c.pdf', { type: 'application/pdf' }),
+    ];
+    const assets = createWebPhotoSource().adoptFiles?.(files) ?? [];
+
+    expect(assets).toHaveLength(2);
+    expect(assets[0].id).toContain('a.jpg');
+    expect(assets[1].id).toContain('b.png');
+    expect(assets[0].locationSource).toBe('none');
+  });
+
+  it('adoptFiles 塞进内部 Map 之后，readThumb 的报错从「不在批次」变成「没有 document」', async () => {
+    const source = createWebPhotoSource();
+    const [asset] = source.adoptFiles?.([new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' })]) ?? [];
+    expect(asset).toBeTruthy();
+
+    // 关键断言：assetId 找得到（否则报「不在当前相册批次里」），
+    // 失败只发生在真正要用 DOM 解码的那一刻
+    await expect(source.readThumb(asset!.id, 256)).rejects.toThrow(/浏览器环境/);
+  });
 });
 
 describe('createNativePhotoSource', () => {
@@ -40,5 +64,9 @@ describe('createNativePhotoSource', () => {
 
   it('readThumb 带 maxEdge 时也抛「未接入」', async () => {
     await expect(createNativePhotoSource().readThumb('x', 128)).rejects.toThrow(/未接入/);
+  });
+
+  it('adoptFiles 抛「未接入」：原生端没有 File，走不到这条反向路径', () => {
+    expect(() => createNativePhotoSource().adoptFiles?.([])).toThrow(/未接入/);
   });
 });

@@ -46,6 +46,16 @@ export interface PhotoSource {
   readonly platform: NativePlatform;
   pickPhotos(options?: PickPhotosOptions): Promise<PhotoAsset[]>;
   readThumb(assetId: string, maxEdge?: number): Promise<ArrayBuffer>;
+  /** 把**页面上已有的** `File[]` 交给相册层，同步换回同序的 `PhotoAsset[]`。
+   *
+   * 为什么需要它：`pickPhotos()` 的语义是"弹系统选择器"，而页面上「导入照片」按钮
+   * 要的是"我自己有一个隐藏的 `<input type=file>`，用户选完把文件直接喂进来"。
+   * 强行用 `pickPhotos` 会弹两次选择器。
+   *
+   * 之所以是**可选**方法：原生端没有 `File` 这个概念（PhotoKit 给的是 `PHAsset`），
+   * 它的 `adoptFiles` 只能抛"未接入"。调用方必须自己判空。
+   */
+  adoptFiles?(files: readonly File[]): PhotoAsset[];
 }
 
 export type PermissionName = 'photos' | 'camera' | 'location';
