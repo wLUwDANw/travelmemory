@@ -1,0 +1,234 @@
+"""语义抽象：把**具体地点**折叠成**六类语义标签**（阶段 7 W7-1）。
+
+## 为什么要做语义抽象
+
+群体推荐的直觉写法是"基于具体地点"：
+
+    去过龙门石窟的人，接着去了老君山  →  推荐老君山
+
+这条记录本身就是重识别攻击的入口。**龙门石窟的游客本就有限**，一条
+`龙门石窟 → 老君山` 的记录几乎能把一个自然人从人群里挑出来；再叠加日期
+（"五一前后"）和一个大概的城市，重识别就是必然而不是风险。
+
+抽象成
+
+    heritage → nature
+
+之后，同一条模式会被**大量**行程命中：任何"看了人文景点之后去爬山"的行程
+都会贡献同一个 `heritage → nature`。这时一条模式记录对应的人群是"所有这么玩过
+的人"，单条记录不再指向个体。
+
+**隐私收益来自泛化，而不是来自加密**：加密只改变数据的存在形式，泛化改变的是
+数据里"有多少可区分信息"。所以本模块是整个阶段 7 的地基 ——
+W7-2 的模式挖掘、W7-3 的匿名门禁，消费的都是这里产出的语义序列。
+
+## 关于术语的诚实表述（设计文档 §9.3）
+
+各客户端在本地完成语义抽取与模式统计，仅上传经扰动的聚合统计量（不含坐标、
+地点或标识），服务端作为逻辑聚合器汇总为全局语义模式库。参与者规模有限
+（数十人量级），**不宣称联邦学习**：隐私收益来自语义抽象 + 扰动 + k-匿名门禁
+三重机制的叠加，而非参与方数量。本模块只负责其中的第一重。
+
+## 分类规则在哪儿
+
+关键词表与投票规则在 `app/utils/semantic_tags.py`（六类词汇的**唯一真相源**，
+与前端 `src/types/share.ts` 的 `ALL_TAGS` 逐项一致）。本模块**不复制**词表，
+只做三件词表层不该管的事：
+
+1. **可审计**：`matched` 记下命中的原始输入片段，`confidence` 记下证据强度 ——
+   "为什么这个石窟被分到 nature"必须能当场回答，否则模式库里的脏数据无从排查。
+2. **平票修正**：词表层的平票规则是"按 `SEMANTIC_TAGS` 顺序取靠前的"（通用规则，
+   保证跨设备一致）。但六类里 `nature` 排在 `watertown` 前面，而 `nature` 的
+   关键字里有单字"江"，于是 `平江路` 会同时命中 `nature`(江) 与 `watertown`(平江路)，
+   按通用规则被判成 `nature` —— 与设计文档 §9.1 的示例行程（平江路 = 水乡·中）矛盾。
+   本模块在**真的平票**时追加一条更细的规则：**命中词更具体的那一类胜出**
+   （"平江路" 4 字 > "江" 1 字）。只有在票数相同的候选之间比较，
+   不影响词表层的任何非平票结果。
+3. **能力门控**：`semantic_tag_for_place()` 走 feature flag，开关关着时"没有语义"
+   而不是报错（见该函数的 docstring）。
+
+## 确定性
+
+纯函数，无 IO、无随机、无缓存：同一输入在 A 机器和 B 机器上必须得到同一个标签，
+否则两地的语义序列对不上，聚合出来的是噪声。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+from app.core.feature_flags import is_enabled
+from app.utils.semantic_tags import (
+    SEMANTIC_TAG_LABELS,
+    SEMANTIC_TAG_VERSION,
+    SEMANTIC_TAGS,
+    TAG_KEYWORDS,
+    classify_semantic_tag,
+)
+
+#: re-export：上层（模式挖掘 / API）引用版本号时不必再往下 import utils。
+VERSION = SEMANTIC_TAG_VERSION
+
+
+@dataclass(frozen=True)
+class SemanticTagResult:
+    """一次语义抽取的完整结果。
+
+    字段为什么要带 `matched` / `confidence` 而不只返回一个字符串：
+    语义标签会落库并参与跨设备的模式聚合，"为什么是这一类"必须能事后回答，
+    否则模式库里出现脏数据时只能靠猜。
+    """
+
+    tag: str | None  # 六类之一，抽取不出来时为 None
+    label: str | None  # 中文名（tag 为 None 时也是 None）
+    version: str  # SEMANTIC_TAG_VERSION
+    matched: tuple[str, ...]  # 命中的输入片段（便于排障"为什么被分到这一类"）
+    confidence: float  # 0.0 ~ 1.0
+
+
+class _PhotoLike(Protocol):
+    """`classify_photo()` 接受的形状（`app.models.photo.Photo` 天然满足）。
+
+    用 Protocol 而不是 import `Photo`：语义抽取会被对象构造之外的场景调用
+    （离线批处理里的轻量 DTO、测试里的假对象），duck typing 让这些调用方
+    不必为了一个标签去拉起 ORM 类。
+    """
+
+    ai_tags: Sequence[str] | None
+    caption: str | None
+
+
+def _segments(
+    poi_type: str | None,
+    ai_tags: Sequence[str] | None,
+    name: str | None,
+) -> list[str]:
+    """展开"参与投票的输入段"：`poi_type` 与 `name` 各一段，`ai_tags` **每项**各一段。
+
+    `ai_tags` 逐项而不是拼成一个大字符串：拼串会让"命中了三类"和"某一类命中三次"
+    无法区分，而前者才是有信息量的证据。
+    """
+    segments: list[str] = [item for item in (poi_type, name) if item]
+    segments.extend(item for item in (ai_tags or ()) if item)
+    return segments
+
+
+def _vote(segments: Sequence[str]) -> tuple[dict[str, int], dict[str, int], dict[str, list[str]]]:
+    """对每段输入投票。
+
+    返回 `(票数, 各类最长命中词长度, 各类命中的原始片段)`。
+    一段文本对同一类最多投 1 票（与 `score_semantic_tags` 一致的去重口径：
+    否则"山山山"这种噪声文本会把自己刷成 nature）。
+    """
+    scores: dict[str, int] = {}
+    longest: dict[str, int] = {}
+    matched: dict[str, list[str]] = {}
+    for segment in segments:
+        haystack = segment.lower()
+        for tag, keywords in TAG_KEYWORDS.items():
+            hit = max((keyword for keyword in keywords if keyword in haystack), key=len, default="")
+            if not hit:
+                continue
+            scores[tag] = scores.get(tag, 0) + 1
+            longest[tag] = max(longest.get(tag, 0), len(hit))
+            matched.setdefault(tag, []).append(segment)
+    return scores, longest, matched
+
+
+def _break_tie(scores: dict[str, int], longest: dict[str, int], default: str | None) -> str | None:
+    """平票修正：票数相同的候选里，**命中词更具体**的那一类胜出。
+
+    `default` 是词表层的答案（`classify_semantic_tag`），即"按 `SEMANTIC_TAGS`
+    顺序取靠前的"。只有真的平票、且存在更长（更具体）的命中词时才覆盖它 ——
+    见模块 docstring 第 2 条里 `平江路` 的例子。命中词长度也相同时退回 `default`，
+    保证"平票按 `SEMANTIC_TAGS` 顺序"这条契约在长度无法区分时依然成立。
+    """
+    if not scores or default is None:
+        return None
+    top = scores[default]
+    tied = [tag for tag in SEMANTIC_TAGS if scores.get(tag, 0) == top]
+    if len(tied) <= 1:
+        return default
+    return max(tied, key=lambda tag: (longest.get(tag, 0), -SEMANTIC_TAGS.index(tag)))
+
+
+def classify_place(
+    *,
+    poi_type: str | None = None,
+    ai_tags: Sequence[str] | None = None,
+    name: str | None = None,
+) -> SemanticTagResult:
+    """把具体地点映射到六类语义标签（纯函数，无 IO）。
+
+    `confidence` = **胜出那一类的票数 / 参与投票的输入段数**（上限 1.0）。
+    口径说明：它是"证据里有多大比例指向这一类"，不是模型概率 ——
+    `poi_type="科教文化服务"` + `name="云台山"` 是 heritage 与 nature 各 1 票，
+    两票里只有一票指向胜出类，`confidence` 就是 0.5，调用方据此可以决定
+    "要不要把这条语义写进序列"。**无命中时 `tag=None` 且 `confidence=0.0`**。
+
+    `matched` 只记命中的**原始**输入片段（小写化之前的样子），
+    因为排障时人要看的是"我传进来的哪一个字符串触发了它"。
+    """
+    segments = _segments(poi_type, ai_tags, name)
+    scores, longest, matched = _vote(segments)
+
+    tag = _break_tie(
+        scores,
+        longest,
+        classify_semantic_tag(poi_type=poi_type, ai_tags=ai_tags, name=name),
+    )
+    if tag is None:
+        return SemanticTagResult(
+            tag=None,
+            label=None,
+            version=VERSION,
+            matched=(),
+            confidence=0.0,
+        )
+
+    total = len(segments)
+    confidence = 0.0 if total == 0 else min(1.0, scores[tag] / total)
+    return SemanticTagResult(
+        tag=tag,
+        label=SEMANTIC_TAG_LABELS[tag],
+        version=VERSION,
+        matched=tuple(matched.get(tag, ())),
+        confidence=confidence,
+    )
+
+
+def classify_photo(photo: _PhotoLike | Any) -> SemanticTagResult:
+    """给一张照片打语义标签：取 `ai_tags` 与 `caption` 两段证据。
+
+    刻意**不 import `app.models.photo.Photo`**：这里是纯函数层，duck typing 让
+    未加载的 ORM 对象、离线批处理的轻量 DTO、测试假对象都能进来。
+    `getattr(..., default)` 而不是直接取属性：SQLAlchemy 对象在字段未加载时会抛
+    `DetachedInstanceError`，而"这段证据缺失"的正确处理是少一票，不是崩掉。
+    """
+    ai_tags = getattr(photo, "ai_tags", None)
+    caption = getattr(photo, "caption", None)
+    return classify_place(poi_type=None, ai_tags=ai_tags, name=caption)
+
+
+def semantic_tag_for_place(
+    *,
+    poi_type: str | None = None,
+    ai_tags: Sequence[str] | None = None,
+    name: str | None = None,
+) -> str | None:
+    """`classify_place()` 的 **feature flag 门控版**（开关名 `semantic`）。
+
+    降级语义（PROJECT.md §二、[8]）：扩展模块默认全关。**关着时返回 `None`，
+    语义能力"不存在"，绝不报错** —— 阶段 6 及以前的调用方要么拿到 `None`
+    要么根本不调这里，行为与阶段 6 完全一致。
+
+    为什么是 `None` 而不是抛异常或返回兜底标签：语义是**增强**，不是链路上的
+    必需环节。抛异常会让"没开这个开关"变成一次 500；返回兜底标签（比如一律
+    `heritage`）则会把噪声写进模式库，比没有数据更糟 —— 猜错的语义序列会污染
+    整个群体模式库，而"没有语义"只是少一条数据。
+    """
+    if not is_enabled("semantic"):
+        return None
+    return classify_place(poi_type=poi_type, ai_tags=ai_tags, name=name).tag
