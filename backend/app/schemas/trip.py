@@ -139,9 +139,53 @@ class TripListResponse(BaseModel):
     trips: list[TripView] = Field(default_factory=list, description="按 started_at 升序")
 
 
+class TripCreateRequest(BaseModel):
+    """`POST /api/v1/trips` 的入参：手工创建一个**空**行程。
+
+    ## 为什么只收 `title`，不收时间 / 照片
+
+    手工行程在这一步是**空的**：它还没有照片，所以 `started_at` / `ended_at`
+    无从谈起（`null` 由后端自己填，不是让用户传一个假时间）。
+    照片通过后续导入进来，行程的边界再由后端按时间与空间重算 ——
+    让用户在这一步就指定"从哪天到哪天"，等于让他手工维护一份
+    后端随时会用照片重算出来的派生值，两边必然打架。
+
+    ## 为什么 `title` 有长度上限且不能是纯空白
+
+    `Trip.title` 是 `String(128)`：数据库会在超长时报错（有些数据库是截断），
+    而"标题太长"是**用户输入问题**，该在入口层就说清楚，而不是变成一次 500。
+
+    空白标题（`title="   "`）会被 Pydantic 原样接受，落库后就是一个
+    看起来为空的行程卡片。所以在校验里剥掉首尾空白再判空 ——
+    **存进去的是剥好的值**，不是"存原值、显示时再剥"。
+    """
+
+    title: str = Field(
+        min_length=1,
+        max_length=128,
+        description="行程标题，如「洛阳两日」。首尾空白会被剥掉，剥完为空则 422",
+    )
+
+
+class TripCreateResponse(BaseModel):
+    """`POST /api/v1/trips` 的响应：新建出来的那一条行程。
+
+    只回一条而不是整个列表：调用方刚发过 `title`，它知道自己建了什么；
+    要刷新列表就再调一次 `GET`。把全量行程塞进创建响应，
+    会让"创建成功"和"列表刷新"两件事在前端共用一个状态位，
+    将来做乐观更新时反而不好拆。
+
+    `source` 恒为 `"manual"` —— 这是本接口存在的全部意义。
+    """
+
+    trip: TripView = Field(description="新建的行程（source 恒为 manual）")
+
+
 __all__ = [
     "ImportPhotosResult",
     "ImportedPhoto",
+    "TripCreateRequest",
+    "TripCreateResponse",
     "TripItemView",
     "TripListResponse",
     "TripView",

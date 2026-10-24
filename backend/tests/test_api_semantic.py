@@ -142,6 +142,47 @@ def test_at_threshold_returns_the_expected_tag(semantic_enabled) -> None:
     assert "暂无足够匿名模式支撑" not in body["message"]
 
 
+def test_gate_blocks_at_four_and_releases_at_five(semantic_enabled) -> None:
+    """端到端复演门禁：**4 条 → 空，补到第 5 条 → 出标签**（本阶段最要紧的一条红线）。
+
+    与上面两条用例的区别是"**一次连续的过程**"：从零开始一条条灌进去，
+    在第 k-1 条与第 k 条之间反复查同一个接口，断言结论**恰好在第 5 条翻转**。
+
+    为什么值得单独一条：前两条各测一个点，而"门禁恰好卡在 5"这件事
+    只有把整条曲线走一遍才成立 —— 万一阈值被改成 4 或 6，只测单点可能都还是绿的
+    （比如改成了 4，`support=4` 那条仍然返回 None，只有"第 4 条就该放行"才红）。
+    """
+    # 前 4 条：每一条之后都必须还是"没有结论"
+    for index in range(K_ANONYMITY - 1):
+        _contribute(_SEQUENCE, score=4.5, user_key=f"anon-{index}")
+        body = client.post(_URL, json={"sequence": ["heritage"]}).json()
+        assert body["tag"] is None, f"第 {index + 1} 条就放行了 —— 门禁阈值不对"
+        assert "暂无足够匿名模式支撑" in body["message"]
+
+    # 第 5 条：翻转
+    _contribute(_SEQUENCE, score=4.5, user_key=f"anon-{K_ANONYMITY - 1}")
+    body = client.post(_URL, json={"sequence": ["heritage"]}).json()
+    assert body["tag"] == "nature"
+
+
+def test_other_prefixes_stay_blocked_while_only_one_is_published(semantic_enabled) -> None:
+    """**门禁是逐模式的**：一条模式达标不会顺带把别的模式放出来。
+
+    把门禁实现成"全局样本量 >= k 就放行"是最容易犯的错：
+    那样只要全站累计到 5 条上报，任何一条 support=1 的模式都会被当共识发出去 ——
+    而 support=1 意味着"有一个人这么走过"，把它公开出去正是 §9 要防的。
+    """
+    for index in range(K_ANONYMITY):
+        _contribute(_SEQUENCE, score=4.5, user_key=f"anon-{index}")
+    # 只有 2 个人走过 heritage → food
+    _contribute(["heritage", "food"], score=4.5, user_key="food-0")
+    _contribute(["heritage", "food"], score=4.5, user_key="food-1")
+
+    assert client.post(_URL, json={"sequence": ["heritage"]}).json()["tag"] == "nature"
+    # 长前缀 support 只有 2，仍须拦住
+    assert client.post(_URL, json={"sequence": ["watertown"]}).json()["tag"] is None
+
+
 def test_response_never_leaks_exact_support(semantic_enabled) -> None:
     """**隐私红线**：响应体里没有 `support`（参与人数），只有相对占比 `confidence`。
 

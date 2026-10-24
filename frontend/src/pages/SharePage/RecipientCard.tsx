@@ -13,7 +13,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { Download, Loader2, Send } from 'lucide-react';
+import { Download, Loader2, Send, TriangleAlert } from 'lucide-react';
 
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -50,6 +50,9 @@ export interface RecipientCardProps {
   warnings: string[];
   /** 这份旅程用到的语义标签（已按六类校验过）。展示用，让发送方在打包前看清分类。 */
   semanticTags?: Tag[];
+  /** 语义标签**缺失**的提示（`null` = 没有缺失，不渲染）。
+   *  打包前就该看见：等包生成完才说，用户已经把一份带占位标签的信物发出去了。 */
+  missingTagNotice?: string | null;
 }
 
 export function RecipientCard({
@@ -67,6 +70,7 @@ export function RecipientCard({
   onGenerate,
   warnings,
   semanticTags,
+  missingTagNotice = null,
 }: RecipientCardProps) {
   return (
     <Card>
@@ -153,6 +157,18 @@ export function RecipientCard({
             <p className="text-xs text-muted-foreground">
               分类随信物一起打包（它是明文，参与承诺校验）。分类算法在后端语义服务，
               前端只做六类校验与保底。
+            </p>
+          </div>
+        )}
+
+        {/* 标签缺回报在**打包之前**：静默兜底会让"没分类过"伪装成"分类成了休闲度假" */}
+        {missingTagNotice && (
+          <div className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <p>
+              <strong>{missingTagNotice}</strong>
+              （缺失是因为照片刚导入时还没有描述文本，后端尚未给出分类；
+              它不会影响加密与验签。）
             </p>
           </div>
         )}

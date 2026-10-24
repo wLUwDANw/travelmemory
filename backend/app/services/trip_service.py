@@ -44,7 +44,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.photo import Photo
-from app.models.trip import TRIP_SOURCE_CLUSTER, Trip, TripItem
+from app.models.trip import TRIP_SOURCE_CLUSTER, TRIP_SOURCE_MANUAL, Trip, TripItem
 from app.services.semantic_service import classify_place
 from app.services.trip_cluster import ClusterConfig, cluster_trips_from_photos
 
@@ -113,17 +113,66 @@ def _trip_title(
 
 
 async def _delete_user_trips(session: AsyncSession, *, user_id: uuid.UUID) -> None:
-    """删掉该用户的全部行程（**只删 trip / trip_item，绝不碰 photo**）。
+    """删掉该用户的**聚类**行程（**只删 trip / trip_item，绝不碰 photo**）。
 
     为什么显式删 `trip_item` 而不是依赖外键的 ON DELETE CASCADE：
     级联是数据库的行为，而"重建会连带清掉条目"这句话应该由代码说出来。
     万一有人用 `create_all` 建了一张没有级联的表，依赖级联就会留下孤儿行，
     而且这种脏数据**不报错**，只在行程详情里表现为"照片数对不上"。
+
+    ## 为什么只删 `source == cluster`（本函数最重要的一条约束）
+
+    `manual` 行程是**用户意图**（"这是我五一的自驾游"），不是照片的派生结果。
+    重建的作用域是"把派生数据按当前照片重算一遍"，把用户亲手建的东西一起删掉
+    属于越界 —— 用户建完一趟空旅程、又导了一批照片，回头发现旅程没了，
+    那是一次**不可恢复的数据丢失**（标题是他自己敲的，库里没有第二份）。
+
+    代价是删除条件多了一个 `source` 过滤，且 `manual` 行程不参与重建后的
+    照片归属：这里的选择是"保留用户意图、接受它暂时是空的"，
+    而不是"为了数据整齐牺牲用户输入"。
     """
-    trip_ids = select(Trip.id).where(Trip.user_id == user_id)
+    trip_ids = select(Trip.id).where(
+        Trip.user_id == user_id, Trip.source == TRIP_SOURCE_CLUSTER
+    )
     await session.execute(delete(TripItem).where(TripItem.trip_id.in_(trip_ids)))
-    await session.execute(delete(Trip).where(Trip.user_id == user_id))
+    await session.execute(
+        delete(Trip).where(Trip.user_id == user_id, Trip.source == TRIP_SOURCE_CLUSTER)
+    )
     await session.flush()
+
+
+async def create_manual_trip(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    title: str,
+) -> Trip:
+    """手工创建一个**空**行程（`source = manual`）。
+
+    为什么允许它是空的：`Trip` 存在的意义是"用户心里的一段旅程"，
+    聚类行程只是它的一种**自动推导方式**。用户可以先建一趟「洛阳两日」、
+    之后再把照片导进来 —— 反过来要求"先有照片才能有行程"，
+    等于把产品的数据模型绑架在某一种推导算法上。
+
+    两个时间字段刻意留 `null` 而不是填 `now()`：
+    行程的起止是**照片决定的事实**，不是"创建时间"。填 `now()` 会让一趟
+    还没开始的旅程在列表里显示为"从今天起"，而这个值将来被照片覆盖时
+    又会突然跳到别的一天 —— 凭空多出一次"日期自己变了"的困惑。
+    `null` 的语义是"还不知道"，这是唯一诚实的取值。
+
+    调用方负责提交事务（与 `import_photos` 的"显式管提交边界"同一套做法）。
+    """
+    trip = Trip(
+        user_id=user_id,
+        title=title,
+        started_at=None,
+        ended_at=None,
+        source=TRIP_SOURCE_MANUAL,
+    )
+    session.add(trip)
+    # flush 拿到数据库生成的 id：调用方要把 id 回给前端，前端据此刷新列表
+    await session.flush()
+    return trip
 
 
 async def rebuild_user_trips(
@@ -134,15 +183,19 @@ async def rebuild_user_trips(
 ) -> list[Trip]:
     """用该用户当前的全部照片**重建**他的行程（幂等）。
 
-    流程固定四步：删旧的 → 取照片 → 聚类 → 落库。
+    流程固定四步：删旧的（**只删聚类的**）→ 取照片 → 聚类 → 落库。
     `Photo` 表全程只读：它是数据源，重建无论如何都不许动它。
 
-    返回新建的 `Trip` 列表（按时间先后）。用户一张照片都没有时返回 `[]`
-    （此时他也没有任何行程 —— 有照片才谈得上行程）。
+    返回重建后该用户的**全部**行程（手工的 + 新建的），顺序与
+    `list_user_trips` 完全一致 —— 导入回执里的 `trip_ids` 因此恒等于
+    `GET /api/v1/trips` 的 id 序列，前端不需要处理"两处顺序不一样"。
 
-    没有照片时不清空旧行程吗？**会清空**。照片被删到一张不剩，行程也就
-    失去了存在的依据；留着它们的结果是"能看到行程但点进去是空的"，
-    不如让视图与数据源保持一致。
+    只返回新建的那几条其实更省事，但那样导入回执与列表接口会给出**不同的答案**，
+    而这种不一致不会报错，只在"导入后列表看起来少了一趟"时被人发现。
+
+    没有照片时不清空旧行程吗？**聚类的会清空**。照片被删到一张不剩，聚类行程
+    也就失去了存在的依据；留着它们的结果是"能看到行程但点进去是空的"，
+    不如让视图与数据源保持一致。手工行程不受影响（见 `_delete_user_trips`）。
     """
     await _delete_user_trips(session, user_id=user_id)
 
@@ -185,7 +238,18 @@ async def rebuild_user_trips(
 
     if trips:
         await session.flush()
-    return trips
+
+    # 统一回读一次：手工行程也要出现在结果里，且顺序必须与 list_user_trips 一致
+    # （同一个 order_by 表达式写两遍容易走样，所以两边用同一串排序键）
+    return list(
+        (
+            await session.execute(
+                select(Trip)
+                .where(Trip.user_id == user_id)
+                .order_by(Trip.started_at.asc().nulls_last(), Trip.id.asc())
+            )
+        ).scalars().all()
+    )
 
 
 async def list_user_trips(
@@ -244,6 +308,7 @@ async def _photos_by_id(
 __all__ = [
     "TripItemSnapshot",
     "TripSnapshot",
+    "create_manual_trip",
     "list_user_trips",
     "rebuild_user_trips",
     "semantic_tag_for_photo",

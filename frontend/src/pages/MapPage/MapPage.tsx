@@ -8,13 +8,14 @@
  *   `MapCanvas` 执行；
  * - 渲染「我的照片」图层：后端 `GET /api/v1/trips` 回来的行程里有坐标的照片，
  *   由 `tripPoints.ts` 折成 `MapPointInput` 后追加进同一份渲染计划；
- * - 左上角悬浮操作面板：新建旅程（如实说明后端暂无写入接口）+ 导入照片（真实
- *   file input → 上传 → 缩略图入库）+ 图层开关；
+ * - 左上角悬浮操作面板：新建旅程（`POST /api/v1/trips`，真的建出一趟空行程）+
+ *   导入照片（真实 file input → 上传 → 缩略图入库）+ 图层开关；
  * - 空态 / 降级态（key 没配、脚本没加载）由 `MapCanvas` 自己渲染，本页不接管。
  *
  * 不做（留给人类 / 后续阶段）：
  * - 60fps 聚合渲染、视口裁剪、轨迹回放 —— 见 `docs/stages/stage6-map-album.md`；
- * - 行程的手工编辑（后端还没有写入接口，见 `CreateTripDialog`）。
+ * - 行程的手工**编辑**（改标题、合并、拆分）：写入接口只有"新建"这一条，
+ *   改与删还没有，所以 `CreateTripDialog` 只负责创建。
  */
 
 import { useMemo, useState } from 'react';

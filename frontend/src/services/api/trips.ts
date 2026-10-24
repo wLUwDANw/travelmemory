@@ -168,3 +168,50 @@ export async function listTrips(options?: TripsApiOptions): Promise<TripView[]> 
   const payload = (await response.json()) as Partial<RawTripListResponse>;
   return asArray(payload.trips).map((item) => toTripView(item as RawTripView | null));
 }
+
+/** `POST /api/v1/trips` 的响应体（后端 `TripCreateResponse`）。 */
+export interface RawTripCreateResponse {
+  trip?: unknown;
+}
+
+/**
+ * 手工创建一个**空**行程，返回后端给的那一条（`source = 'manual'`）。
+ *
+ * ## 为什么这里不自己拼一个 TripView 返回
+ *
+ * 后端要生成的只有 id 和主键，但"这次到底建成了什么"只有后端知道：
+ * `source` 是不是真的 `manual`、`started_at` 是不是 `null`、标题被剥成什么样。
+ * 前端按入参自己拼一份，等于把"创建成功"变成一个**本地断言** ——
+ * 哪天后端改了降级策略（比如开关没开时返回 404），前端照样报"创建成功"。
+ *
+ * ## 404 的错误信息为什么要说人话
+ *
+ * 后端 `photo_import` 开关关着时返回 404（能力不存在，不是权限问题）。
+ * 直接把 `HTTP 404` 抛给上层，用户看到的是一句看不懂的数字；
+ * 而这是**可预期的运营状态**，不是 bug —— 所以在这里翻译成一句能行动的话。
+ */
+export async function createTrip(title: string, options?: TripsApiOptions): Promise<TripView> {
+  const url = `${resolveBaseUrl(options)}/api/v1/trips`;
+  let response: Response;
+  try {
+    response = await resolveFetch(options)(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+  } catch (err) {
+    throw new Error(`新建旅程失败：网络请求异常（${describeError(err)}）`);
+  }
+
+  if (response.status === 404) {
+    throw new Error('新建旅程失败：后端尚未启用照片导入能力（photo_import 开关未开）');
+  }
+
+  if (!response.ok) {
+    const body = excerpt(await response.text());
+    throw new Error(`新建旅程失败：HTTP ${response.status}${body ? ` —— ${body}` : ''}`);
+  }
+
+  const payload = (await response.json()) as Partial<RawTripCreateResponse>;
+  return toTripView(payload.trip as RawTripView | null);
+}

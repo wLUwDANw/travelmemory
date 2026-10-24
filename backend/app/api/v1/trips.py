@@ -1,4 +1,7 @@
-"""W6-2 的读取接口：`GET /api/v1/trips`。
+"""行程的读写接口：`GET /api/v1/trips` 与 `POST /api/v1/trips`（阶段 6 收尾）。
+
+`GET` 来自 W6-2 的导入闭环；`POST` 是把"新建旅程"按钮从**禁用**解开的那一半
+（前端 `CreateTripDialog` 原来只能解释"为什么不能点"，现在能真的建出一趟空行程）。
 
 ## 为什么行程要单独有一个列表接口
 
@@ -31,10 +34,18 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.feature_flags import is_enabled
 from app.db.session import SessionFactory
-from app.schemas.trip import TripItemView, TripListResponse, TripView, iso_or_none
+from app.schemas.trip import (
+    TripCreateRequest,
+    TripCreateResponse,
+    TripItemView,
+    TripListResponse,
+    TripView,
+    iso_or_none,
+)
 from app.services.trip_service import (
     TripItemSnapshot,
     TripSnapshot,
+    create_manual_trip,
     list_user_trips,
     semantic_tag_for_photo,
 )
@@ -92,3 +103,57 @@ async def list_trips() -> TripListResponse:
         snapshots = await list_user_trips(session, user_id=user.id)
 
     return TripListResponse(trips=[_to_trip_view(snapshot) for snapshot in snapshots])
+
+
+@router.post(
+    "",
+    summary="手工创建一个空行程",
+    response_model=TripCreateResponse,
+    status_code=201,
+)
+async def create_trip(req: TripCreateRequest) -> TripCreateResponse:
+    """创建一个还没有照片的行程（`source = "manual"`）。
+
+    ## 为什么允许"空的"
+
+    行程是用户心里的一段旅程，聚类只是**推导**它的一种方式。用户可以先建
+    「洛阳两日」再补照片；反过来要求"先有照片才能有行程"，等于把数据模型
+    绑死在某一种推导算法上 —— 而恰恰是这种要求，让 UI 上那个"新建旅程"按钮
+    从一开始就是禁用的（按钮禁用却说不清什么时候能解开，比能点更让人困惑）。
+
+    ## 为什么手工行程不会被后续导入冲掉
+
+    `rebuild_user_trips()` 重建时**只删 `source == cluster` 的行**
+    （见 `services/trip_service.py::_delete_user_trips` 的取舍说明）。
+    用户敲下的标题是库里唯一的副本，删了就找不回来，所以这里守的是
+    "派生数据可以让位，用户输入不行"这条线。
+
+    ## 为什么剥掉标题首尾空白
+
+    纯空白标题落库后是一个**看起来为空**的行程卡片，用户会以为"创建没生效"。
+    在入口剥掉并判空，比在渲染时再处理更早也更省事。
+    """
+    if not is_enabled("photo_import"):
+        raise HTTPException(status_code=404, detail="该能力未启用")
+
+    title = req.title.strip()
+    if not title:
+        # Pydantic 的 min_length 挡不住 "   "（它是 3 个字符），只能在这里判
+        raise HTTPException(status_code=422, detail="行程标题不能为空")
+
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        trip = await create_manual_trip(session, user_id=user.id, title=title)
+        await session.commit()
+
+    return TripCreateResponse(
+        trip=TripView(
+            id=str(trip.id),
+            title=trip.title,
+            started_at=iso_or_none(trip.started_at),
+            ended_at=iso_or_none(trip.ended_at),
+            source=trip.source,
+            item_count=0,
+            items=[],
+        )
+    )

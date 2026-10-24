@@ -26,9 +26,29 @@ from app.services.semantic_service import (
     SemanticTagResult,
     classify_photo,
     classify_place,
+    semantic_sequence_for_trip,
     semantic_tag_for_place,
+    semantic_tag_for_place_object,
 )
+from app.services.semantic_trajectory import extract_sequences
 from app.utils.semantic_tags import SEMANTIC_TAG_LABELS, SEMANTIC_TAG_VERSION, SEMANTIC_TAGS
+
+
+class _FakePlace:
+    """最小地点替身：`semantic_sequence_for_trip` 靠 duck typing 取字段，不需要 ORM。"""
+
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        tag: str | None = None,
+        poi_type: str | None = None,
+        ai_tags: list[str] | None = None,
+    ) -> None:
+        self.name = name
+        self.tag = tag
+        self.poi_type = poi_type
+        self.ai_tags = ai_tags
 
 #: 仓库根（本文件在 backend/tests/ 下）
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -294,7 +314,7 @@ def test_flag_on_returns_real_tag(monkeypatch):
 
 def test_version_is_reexported():
     assert VERSION == SEMANTIC_TAG_VERSION
-    assert VERSION == "sem-2026.1"
+    assert VERSION == "sem-2026.2"
 
 
 def test_backend_and_frontend_vocabulary_match():
@@ -312,3 +332,94 @@ def test_backend_and_frontend_vocabulary_match():
 
     frontend_tags = re.findall(r"'([^']+)'", block.group(1))
     assert frontend_tags == list(SEMANTIC_TAGS)
+
+
+# ---------------------------------------------------------------------------
+# 6. Trip → 语义轨迹序列
+# ---------------------------------------------------------------------------
+
+
+def test_luoyang_itinerary_sequence() -> None:
+    """设计文档 §9.1 洛阳线：每个地点一个标签，**不合并相邻的相同标签**。"""
+    places = [
+        _FakePlace(name="龙门石窟"),
+        _FakePlace(name="洛邑古城"),
+        _FakePlace(name="老君山"),
+    ]
+    assert semantic_sequence_for_trip(places) == ["heritage", "heritage", "nature"]
+
+
+def test_suzhou_shanghai_itinerary_sequence() -> None:
+    """§9.1 苏州—上海线。"""
+    places = [
+        _FakePlace(name="拙政园"),
+        _FakePlace(name="平江路"),
+        _FakePlace(name="外滩"),
+        _FakePlace(name="陆家嘴"),
+    ]
+    assert semantic_sequence_for_trip(places) == [
+        "watertown", "watertown", "metropolis", "metropolis",
+    ]
+
+
+def test_sequence_skips_unclassifiable_places() -> None:
+    """抽不出标签的地点**跳过**，不塞 `None` / `unknown` 占位符。
+
+    占位符会被下游 `validate_sequence()` 静默丢掉，于是"序列长度"和"地点数"
+    对不上，而这种错位不报错 —— 直接跳过至少让两者都诚实。
+    """
+    places = [_FakePlace(name="龙门石窟"), _FakePlace(name="完全不知名的地方"), _FakePlace(name="老君山")]
+    assert semantic_sequence_for_trip(places) == ["heritage", "nature"]
+
+
+def test_sequence_of_empty_trip_is_empty() -> None:
+    assert semantic_sequence_for_trip([]) == []
+
+
+def test_existing_tag_is_preferred_over_reclassification() -> None:
+    """库里已有的 `tag` 直接用，不重新抽 —— 保证同一趟行程的序列可复现。"""
+    place = _FakePlace(name="老君山", tag="heritage")
+    assert semantic_sequence_for_trip([place]) == ["heritage"]
+
+
+def test_invalid_stored_tag_is_reclassified() -> None:
+    """存了个不是六类的 `tag`（旧词表 / 空串）→ 按"没有标签"重抽，而不是照抄。"""
+    place = _FakePlace(name="老君山", tag="NOT_A_TAG")
+    assert semantic_sequence_for_trip([place]) == ["nature"]
+
+
+def test_sequence_uses_ai_tags_when_no_name() -> None:
+    """导入链路常常只有 `ai_tags`（还没有 caption）。"""
+    assert semantic_sequence_for_trip([_FakePlace(ai_tags=["石窟"])]) == ["heritage"]
+
+
+def test_min_confidence_filters_weak_evidence() -> None:
+    """`min_confidence` 调高 → 证据互相矛盾的地点被剔除。"""
+    # 「科教文化服务」投 heritage、「云台山」投 nature：两票里只有一票指向胜出类
+    place = _FakePlace(name="云台山", poi_type="科教文化服务")
+    assert semantic_sequence_for_trip([place], min_confidence=0.0) != []
+    assert semantic_sequence_for_trip([place], min_confidence=1.0) == []
+
+
+def test_sequence_differs_from_pattern_mining_sequence() -> None:
+    """**两个"序列"不是一回事**：展示用不合并，挖掘用必须合并相邻重复。
+
+    这条断言守的是"拿错方向"：用展示序列去 `submit()` 会碎掉模式库，
+    用挖掘序列去展示会让用户以为自己少去了几站。
+    """
+    places = [
+        _FakePlace(name="龙门石窟"),
+        _FakePlace(name="洛邑古城"),
+        _FakePlace(name="老君山"),
+    ]
+    assert semantic_sequence_for_trip(places) == ["heritage", "heritage", "nature"]
+
+    # 挖掘侧：合并相邻相同标签 → 一条二元序列
+    tagged = [_FakePlace(tag=tag) for tag in semantic_sequence_for_trip(places)]
+    assert extract_sequences(tagged) == [("heritage", "nature")]
+
+
+def test_place_object_tag_lookup_ignores_non_string() -> None:
+    """`tag` 是 None / 非字符串时按"没有标签"处理，不抛异常。"""
+    assert semantic_tag_for_place_object(_FakePlace(name="老君山", tag=None)) == "nature"
+    assert semantic_tag_for_place_object(object()) is None

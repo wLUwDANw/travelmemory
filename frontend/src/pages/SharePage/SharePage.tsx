@@ -45,7 +45,12 @@ import { SHARE_FILE_EXTENSION } from '../../services/share/schema';
 import { unpackForViewer } from '../../services/share/unpack';
 import type { Tag, Trip, UnpackedPlace, UnpackViewerResult } from '../../types/share';
 import { demoTrip, demoVisibility } from './demoTrip';
-import { hydrateTripPhotos, tripViewToTrip } from './tripSource';
+import {
+  countMissingSemanticTags,
+  describeMissingSemanticTags,
+  hydrateTripPhotos,
+  tripViewToTrip,
+} from './tripSource';
 import { FriendsCard } from './FriendsCard';
 import { IdentityCard } from './IdentityCard';
 import { ImportCard } from './ImportCard';
@@ -198,6 +203,16 @@ export function SharePage({ onViewOnMap, trips = [] }: SharePageProps) {
     return ALL_SEMANTIC_TAGS.filter((tag) => seen.has(tag));
   }, [normalizedTrip]);
 
+  /** 语义标签**缺失**的地点数（后端 `semanticTag === null` 的那些）。
+   *
+   * 导入那一刻照片还没有描述文本，后端诚实返回 null，`itemToPlace` 会静默
+   * 退回 `leisure` —— 打包照样成功，所以这件事必须在**打包前**说出来，
+   * 否则收件人会把一个占位符当成发送方的分类结论。 */
+  const missingTagNotice = useMemo(
+    () => (selectedTrip ? describeMissingSemanticTags(countMissingSemanticTags(selectedTrip)) : null),
+    [selectedTrip],
+  );
+
   /** 通讯录变了就重读，并顺手把已经不存在的好友从勾选里摘掉
    *  （留着一个幽灵 id 会让"勾选人数"和实际收件人对不上）。 */
   const refreshFriends = useCallback(() => {
@@ -247,11 +262,14 @@ export function SharePage({ onViewOnMap, trips = [] }: SharePageProps) {
       );
 
       downloadShareFile(result.pkg, `${result.pkg.shareId}${SHARE_FILE_EXTENSION}`);
-      setWarnings(
-        droppedPlaces > 0
-          ? [...result.warnings, `有 ${droppedPlaces} 个地点缺少本机缩略图，未打包进去`]
-          : result.warnings,
-      );
+      // 标签缺回报也要进回执：包已经发出去了，用户需要一份"这包里有什么是占位的"记录
+      const postWarnings = [...result.warnings];
+      if (droppedPlaces > 0) {
+        postWarnings.push(`有 ${droppedPlaces} 个地点缺少本机缩略图，未打包进去`);
+      }
+      const tagNotice = missingTagNotice;
+      if (tagNotice) postWarnings.push(tagNotice);
+      setWarnings(postWarnings);
       toast({
         variant: 'success',
         title: '信物已生成',
@@ -267,7 +285,7 @@ export function SharePage({ onViewOnMap, trips = [] }: SharePageProps) {
     } finally {
       setGenerating(false);
     }
-  }, [identity, normalizedTrip, usingDemo, recipientPubkeys, visibility]);
+  }, [identity, normalizedTrip, usingDemo, recipientPubkeys, visibility, missingTagNotice]);
 
   const importFile = useCallback(
     async (file: File) => {
@@ -347,6 +365,7 @@ export function SharePage({ onViewOnMap, trips = [] }: SharePageProps) {
         onGenerate={() => void generate()}
         warnings={warnings}
         semanticTags={semanticTags}
+        missingTagNotice={missingTagNotice}
       />
 
       <ImportCard

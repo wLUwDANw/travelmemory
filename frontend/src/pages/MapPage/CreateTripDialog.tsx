@@ -1,21 +1,30 @@
-/** 「新建旅程」对话框。
+/** 「新建旅程」对话框 —— 真的建出一趟**空**行程（`POST /api/v1/trips`）。
  *
- * ## 诚实说明：这一版**不能**真的建出一条空旅程
+ * ## 这一版为什么不再是禁用的
  *
- * 后端目前只有 `GET /api/v1/trips`（读），没有任何写入接口 —— `backend/app/api/v1/trips.py`
- * 里只有一个 `@router.get("")`。行程是后端 `services/trip_cluster.py` 在**导入照片之后**
- * 按「时间相邻 + 空间相邻」聚类出来的，库里没有 `POST /trips` 可以调。
+ * 上一版的确认按钮是**禁用**的，旁边写着「空旅程需要先导入照片」：那时后端
+ * 只有 `GET /api/v1/trips`，没有任何写入接口，按钮点了也没地方去。
+ * **与其伪造一个「已创建」，不如禁用并说明原因** —— 那是对当时事实的诚实表达。
  *
- * 所以这里的确认按钮是**禁用**的，并且把原因写在按钮旁边：
- * 「空旅程需要先导入照片」。**不伪造一个假的『已创建』** —— 一个点下去显示创建成功、
- * 刷新之后什么都没有的按钮，比一个禁用并说明原因的按钮糟糕得多。
+ * 现在后端补上了 `POST /api/v1/trips`（`source = "manual"`），事实变了，
+ * 所以按钮解开了。**禁用不是一种设计风格，它只是"还做不到"的临时标记**，
+ * 接口一到位就该撤掉，而不是继续留着当免责声明。
  *
- * 等后端补上 `POST /api/v1/trips`，只需要把 `MANUAL_TRIP_ENDPOINT_READY` 翻成
- * `true` 并接上客户端方法，表单与校验都是现成的。
+ * ## 为什么手工行程不会被后续导入冲掉
+ *
+ * 后端 `rebuild_user_trips()` 重建行程时**只删 `source === 'cluster'` 的行**
+ * （见 `backend/app/services/trip_service.py::_delete_user_trips`）。
+ * 用户敲下的标题是库里唯一的副本，删了就找不回来 ——
+ * 派生数据可以让位，用户输入不行。所以"先建旅程再导照片"是安全的操作顺序。
+ *
+ * ## 失败一律让用户看见
+ *
+ * 创建失败（网络断、后端 404 因为开关没开）**必须弹出来**，不能静默关掉对话框：
+ * 静默的结果是"我明明点了创建，列表里却没有"，而用户会把它记成数据丢了。
  */
 
 import { useState } from 'react';
-import { ImageDown, Info } from 'lucide-react';
+import { ImageDown, Info, Loader2 } from 'lucide-react';
 
 import { Button } from '../../components/ui/button';
 import {
@@ -29,24 +38,57 @@ import {
 } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-
-/** 后端是否有「新建空旅程」的写入接口。**当前没有**，见文件头。 */
-export const MANUAL_TRIP_ENDPOINT_READY = false;
+import { toast } from '../../components/ui/use-toast';
+import { createTrip } from '../../services/api/trips';
 
 export interface CreateTripDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** 「去导入照片」：关掉本对话框并拉起文件选择器。由 MapActionPanel 注入。 */
   onImportPhotos?: () => void;
+  /** 创建成功后通知上层刷新行程列表（新行程要立刻出现在列表里）。 */
+  onCreated?: () => void;
 }
 
 const MAX_TITLE = 40;
 
-export function CreateTripDialog({ open, onOpenChange, onImportPhotos }: CreateTripDialogProps) {
+export function CreateTripDialog({
+  open,
+  onOpenChange,
+  onImportPhotos,
+  onCreated,
+}: CreateTripDialogProps) {
   const [title, setTitle] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const trimmed = title.trim();
-  const confirmEnabled = MANUAL_TRIP_ENDPOINT_READY && trimmed.length > 0;
+  // 空白标题后端会 422，这里先拦一道：让按钮的可用性就是"能不能提交"的真相
+  const confirmEnabled = trimmed.length > 0 && !creating;
+
+  async function submit(): Promise<void> {
+    if (!confirmEnabled) return;
+    setCreating(true);
+    try {
+      const trip = await createTrip(trimmed);
+      toast({
+        variant: 'success',
+        title: '旅程已创建',
+        description: `「${trip.title}」—— 导入照片后会自动归到这趟行程。`,
+      });
+      setTitle('');
+      onOpenChange(false);
+      onCreated?.();
+    } catch (err) {
+      // 失败不关对话框：标题还在输入框里，用户改一下就能重试
+      toast({
+        variant: 'destructive',
+        title: '创建失败',
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setCreating(false);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -54,7 +96,7 @@ export function CreateTripDialog({ open, onOpenChange, onImportPhotos }: CreateT
         <DialogHeader>
           <DialogTitle>新建旅程</DialogTitle>
           <DialogDescription>
-            给这趟旅行起个名字。确认前需要先有照片。
+            给这趟旅行起个名字。创建后可以先导入照片，也可以之后再补。
           </DialogDescription>
         </DialogHeader>
 
@@ -66,19 +108,20 @@ export function CreateTripDialog({ open, onOpenChange, onImportPhotos }: CreateT
             maxLength={MAX_TITLE}
             placeholder="例如：洛阳两日"
             onChange={(event) => setTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void submit();
+            }}
           />
           <p className="text-xs text-muted-foreground">
             {trimmed.length}/{MAX_TITLE}
           </p>
         </div>
 
-        <div className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+        <div className="flex gap-2 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-900">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p>
-            <strong>空旅程需要先导入照片。</strong>
-            后端目前只能读取行程（<code>GET /api/v1/trips</code>），还没有「新建空旅程」接口；
-            行程是在导入照片后由后端按时间与地点聚类出来的，标题也由后端给出。
-            先导入照片，行程会自动出现在这里。
+            创建的是一趟<strong>空行程</strong>：照片要另外导入。手工创建的行程
+            <strong>不会被后续导入冲掉</strong>，所以先建旅程再导照片是安全的。
           </p>
         </div>
 
@@ -99,8 +142,13 @@ export function CreateTripDialog({ open, onOpenChange, onImportPhotos }: CreateT
           <DialogClose asChild>
             <Button variant="ghost">取消</Button>
           </DialogClose>
-          <Button disabled={!confirmEnabled} title={confirmEnabled ? '' : '空旅程需要先导入照片'}>
-            创建
+          <Button
+            disabled={!confirmEnabled}
+            onClick={() => void submit()}
+            title={trimmed.length > 0 ? '' : '请先填写旅程标题'}
+          >
+            {creating && <Loader2 className="h-4 w-4 animate-spin" />}
+            {creating ? '创建中…' : '创建'}
           </Button>
         </DialogFooter>
       </DialogContent>

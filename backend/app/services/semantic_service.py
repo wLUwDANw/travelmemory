@@ -66,6 +66,7 @@ from app.utils.semantic_tags import (
     SEMANTIC_TAGS,
     TAG_KEYWORDS,
     classify_semantic_tag,
+    is_semantic_tag,
 )
 
 #: re-export：上层（模式挖掘 / API）引用版本号时不必再往下 import utils。
@@ -210,6 +211,93 @@ def classify_photo(photo: _PhotoLike | Any) -> SemanticTagResult:
     ai_tags = getattr(photo, "ai_tags", None)
     caption = getattr(photo, "caption", None)
     return classify_place(poi_type=None, ai_tags=ai_tags, name=caption)
+
+
+def semantic_tag_for_place_object(place: Any) -> str | None:
+    """从一个地点对象上取语义标签：**已有 `tag` 就用它，没有才现算**。
+
+    为什么先看 `tag` 再分类：库里的 `Place.tag` 是**当初**抽出来的结论，
+    而地点名/POI 类型可能随时被改。对同一趟行程重跑两次抽取却得到两个序列，
+    会让"这趟行程的语义轨迹"变成一件不可复现的事 —— 而阶段 7 的群体模式库
+    恰恰要求同一条行程在任何时候都抽出同一条序列。
+
+    `tag` 必须**真的是六类之一**才采纳（`is_semantic_tag`）：库里可能存着
+    旧版本词表抽出来的标签，或者空串，那些按"没有标签"处理，重新抽一次。
+    """
+    existing = getattr(place, "tag", None)
+    if isinstance(existing, str) and is_semantic_tag(existing):
+        return existing
+
+    return classify_place(
+        poi_type=_attr(place, "poi_type"),
+        ai_tags=_attr(place, "ai_tags"),
+        name=_attr(place, "name") or _attr(place, "title") or _attr(place, "caption"),
+    ).tag
+
+
+def _attr(obj: Any, name: str) -> Any:
+    """取属性，取不到（或 ORM 字段未加载）时给 `None` 而不是抛异常。
+
+    与 `classify_photo()` 里同一条理由：SQLAlchemy 对象在字段未加载时会抛
+    `DetachedInstanceError`，而"这段证据缺失"的正确处理是少一票，不是崩掉。
+    """
+    try:
+        value = getattr(obj, name, None)
+    except Exception:  # noqa: BLE001 - DetachedInstanceError 等 ORM 惰性加载异常
+        return None
+    if name == "ai_tags":
+        return value if isinstance(value, (list, tuple)) else None
+    return value if isinstance(value, str) else None
+
+
+def semantic_sequence_for_trip(
+    places: Sequence[Any],
+    *,
+    min_confidence: float = 0.0,
+) -> list[str]:
+    """把一个 Trip 的**全部地点**折成语义轨迹序列，如 `["heritage", "heritage", "nature"]`。
+
+    ## 与 `semantic_trajectory.extract_sequences()` 的区别（两者都叫"序列"，但不是一回事）
+
+    | | 本函数 | `extract_sequences` |
+    | --- | --- | --- |
+    | 每个地点 | **一个标签**，不合并 | 合并相邻的相同标签 |
+    | 输出 | `["heritage", "heritage", "nature"]` | `[("heritage", "nature")]` |
+    | 用途 | **展示**：这就是这趟行程的语义轨迹 | **挖掘**：喂给模式库统计 `support` |
+
+    为什么两都要有：展示时"连着逛了两个石窟"是有信息量的（它占了两站），
+    而挖掘时它必须合并 —— 否则 `heritage→heritage→nature` 会多出一条
+    几乎无人命中的 `(("heritage","heritage"), "nature")` 模式，白白稀释支持度。
+    **用错方向的代价是真实可见的**：拿本函数的序列去 `submit()`，
+    模式库会碎成一片；拿合并后的序列去展示，用户会以为自己只去过三个地方。
+
+    ## 抽不出标签的地点：**跳过**，不占位
+
+    序列里不会出现 `None` / `"unknown"`：一个"未知"占位符会让下游的
+    `validate_sequence()` 静默丢掉它，于是序列长度与地点数对不上，
+    而这种错位不报错。跳过同样会改变长度，但语义是诚实的 ——
+    "这趟行程里有 2 个地点我们还不知道是什么"。
+
+    ## `min_confidence`
+
+    证据太弱时（`classify_place` 的 `confidence` 低于阈值）也跳过，默认 `0.0`
+    即"有分类就收"。调高它表示"只在比较确定时才写进轨迹"。
+    """
+    sequence: list[str] = []
+    for place in places:
+        tag = semantic_tag_for_place_object(place)
+        if tag is None:
+            continue
+        if min_confidence > 0.0:
+            confidence = classify_place(
+                poi_type=_attr(place, "poi_type"),
+                ai_tags=_attr(place, "ai_tags"),
+                name=_attr(place, "name") or _attr(place, "title") or _attr(place, "caption"),
+            ).confidence
+            if confidence < min_confidence:
+                continue
+        sequence.append(tag)
+    return sequence
 
 
 def semantic_tag_for_place(

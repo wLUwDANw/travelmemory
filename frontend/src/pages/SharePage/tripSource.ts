@@ -26,7 +26,7 @@
 
 import type { TripView } from '../../services/api/trips';
 import type { ThumbnailStore } from '../../types/native';
-import type { Day, Place, Trip, TripPhoto } from '../../types/share';
+import { TAG_LABELS, type Day, type Place, type Trip, type TripPhoto } from '../../types/share';
 import { FALLBACK_SEMANTIC_TAG, normalizeSemanticTag } from './semanticTags';
 // 缩略图的长边必须与导入时存进去的那一档一致，否则 `thumbs.get` 只会拿回 null。
 // 故意跨页 import 而不是再写一个 256：两个常量各写一份，改一处忘另一处，
@@ -35,6 +35,34 @@ import { THUMB_MAX_EDGE } from '../MapPage/photoImport';
 
 /** 无拍摄时间的照片归到这一天。`Day.date` 必须是 YYYY-MM-DD（收件人侧按它排序）。 */
 export const UNDATED_DAY = '1970-01-01';
+
+/** 语义标签暂缺时的提示语（`TripView.items[].semanticTag === null` 的那些地点）。
+ *
+ * 为什么必须说出来：`itemToPlace()` 会把缺失的标签**静默**退回 `'leisure'`，
+ * 打包照样成功、收件人照样能解开 —— 于是"这个地点其实没被分类过"这件事
+ * 在整条链路上没有任何一处会报错。收件人看到一个写着「休闲度假」的地点，
+ * 会以为是发送方（或算法）的判断，而它其实只是个占位符。
+ *
+ * 静默兜底本身是对的（协议要求 `tag` 必填，抛错会让整个包生成失败），
+ * 但"兜底"和"告诉用户兜底了"是两件事，少后者就是把猜测伪装成事实。 */
+export const MISSING_SEMANTIC_TAG_HINT = '该地点标签暂缺，分享将使用默认标签';
+
+/** 统计一趟行程里**语义标签缺失**的地点数（`semanticTag` 为 null）。
+ *
+ * 只数 `null`，不数"非法值"：后者是后端给了个新词（词表还没下发），
+ * 那是另一回事；`null` 才是"导入那一刻还没有任何证据"——
+ * 照片刚入库时 `caption` 还没生成，后端诚实返回 null，
+ * 这是本阶段**必然发生**的常态，不是异常。
+ */
+export function countMissingSemanticTags(view: TripView): number {
+  return view.items.filter((item) => item.semanticTag == null).length;
+}
+
+/** 缺失数 → 一句能直接显示的提示；没有缺失时返回 `null`（让 UI 不必判空字符串）。 */
+export function describeMissingSemanticTags(count: number): string | null {
+  if (count <= 0) return null;
+  return `有 ${count} 个地点${MISSING_SEMANTIC_TAG_HINT}「${TAG_LABELS[FALLBACK_SEMANTIC_TAG]}」`;
+}
 
 /** 后端没有给出"喜爱程度"这类信号，统一给中档 —— 猜高猜低都是在编数据。 */
 const DEFAULT_INTENSITY = 'mid';

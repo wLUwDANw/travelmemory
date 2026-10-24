@@ -260,6 +260,7 @@ export function MapActionPanel({
         open={tripDialogOpen}
         onOpenChange={setTripDialogOpen}
         onImportPhotos={pickFiles}
+        onCreated={onTripsChanged}
       />
     </div>
   );

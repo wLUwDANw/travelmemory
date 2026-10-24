@@ -207,7 +207,7 @@ class Settings(BaseSettings):
     zk_enabled: bool = False
     chain_enabled: bool = False
     privacy_version: str = "privacy-2026.1"
-    semantic_tag_version: str = "sem-2026.1"
+    semantic_tag_version: str = "sem-2026.2"
 
     # ---------------- 派生属性 ----------------
     @property

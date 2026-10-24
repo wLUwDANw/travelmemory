@@ -9,7 +9,15 @@ import { describe, expect, it } from 'vitest';
 
 import type { TripItemView, TripView } from '../../services/api/trips';
 import type { ThumbnailStore } from '../../types/native';
-import { UNDATED_DAY, dayKeyOf, hydrateTripPhotos, tripViewToTrip } from './tripSource';
+import {
+  MISSING_SEMANTIC_TAG_HINT,
+  UNDATED_DAY,
+  countMissingSemanticTags,
+  dayKeyOf,
+  describeMissingSemanticTags,
+  hydrateTripPhotos,
+  tripViewToTrip,
+} from './tripSource';
 
 function item(overrides: Partial<TripItemView> = {}): TripItemView {
   return {
@@ -303,5 +311,41 @@ describe('hydrateTripPhotos', () => {
 
     expect(filled.days).toHaveLength(0);
     expect(droppedPlaces).toBe(1);
+  });
+});
+
+describe('语义标签缺失的兜底提示', () => {
+  it('数出 semanticTag 为 null 的地点', () => {
+    const view = trip([
+      item({ id: 'i1', semanticTag: null }),
+      item({ id: 'i2', semanticTag: 'heritage' }),
+      item({ id: 'i3', semanticTag: null }),
+    ]);
+
+    expect(countMissingSemanticTags(view)).toBe(2);
+  });
+
+  it('非法标签不算"缺失"——那是后端给了新词，是另一回事', () => {
+    const view = trip([item({ semanticTag: 'not-a-tag' })]);
+    expect(countMissingSemanticTags(view)).toBe(0);
+  });
+
+  it('没有缺失时提示为 null（UI 不必判空字符串）', () => {
+    const view = trip([item({ semanticTag: 'heritage' })]);
+    expect(countMissingSemanticTags(view)).toBe(0);
+    expect(describeMissingSemanticTags(0)).toBeNull();
+  });
+
+  it('有缺失时把"暂缺"与默认标签都说清楚', () => {
+    const notice = describeMissingSemanticTags(3);
+    expect(notice).toContain(MISSING_SEMANTIC_TAG_HINT);
+    // 兜底标签的中文名必须出现：否则用户不知道"默认标签"到底是哪个
+    expect(notice).toContain('休闲度假');
+    expect(notice).toContain('3');
+  });
+
+  it('缺失的地点在打包时被静默退回 leisure —— 这正是必须提示的原因', () => {
+    const result = tripViewToTrip(trip([item({ id: 'i1', semanticTag: null })]));
+    expect(result.days[0].places[0].tag).toBe('leisure');
   });
 });
