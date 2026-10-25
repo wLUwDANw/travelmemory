@@ -53,6 +53,7 @@ from app.main import app
 from app.models.user import User
 
 _IMPORT_URL = "/api/v1/photos/import"
+_PHOTOS_URL = "/api/v1/photos"
 _TRIPS_URL = "/api/v1/trips"
 
 #: 杭州西湖附近（北纬 30.2422 / 东经 120.1494）的度分秒表示
@@ -315,47 +316,48 @@ async def test_importing_twice_counts_duplicate_on_second_call(
     assert second.json()["photos"][0]["id"] == first.json()["photos"][0]["id"]
 
 
-# ---------------------------------------------------------------- 导入 → 行程
+# ---------------------------------------------------------------- 导入不再聚类
 
 
-async def test_import_returns_trip_ids(
+async def test_import_creates_no_trips(
     client: httpx.AsyncClient, db_user, photo_import_enabled
 ) -> None:
-    """导入必须回 `trip_ids`：行程是导入的**直接产物**，回执里不能没有它。"""
+    """**阶段 7 的架构调整**：导入只写 `Photo` 表，一趟行程都不产生。
+
+    照片是唯一的物理事实，行程是用户手动组建的视图。原先"导入即全量重建"
+    会让用户没有发言权、还会冲掉手工整理的结果，所以这条链被摘掉了。
+    """
     response = await client.post(_IMPORT_URL, files=_upload(_jpeg_bytes(dt_original=_T1, gps=HZ_GPS)))
 
-    trip_ids = response.json()["trip_ids"]
-    assert len(trip_ids) == 1
-    # 是 UUID 字符串而不是 ORM 对象的 repr
-    assert uuid.UUID(trip_ids[0]) is not None
+    body = response.json()
+    assert body["imported"] == 1
+    # 响应里不再有 trip_ids 字段：留一个恒为 [] 的键会让前端继续写死代码
+    assert "trip_ids" not in body
+    # 库里也确实没有行程
+    assert (await client.get(_TRIPS_URL)).json()["trips"] == []
 
 
-async def test_import_rebuilds_trips_from_the_whole_photo_set(
+async def test_imported_photos_are_listable(
     client: httpx.AsyncClient, db_user, photo_import_enabled
 ) -> None:
-    """一次导入三张（两趟）：行程按时间断层切成两趟，且 `trip_ids` 与 GET 一致。"""
-    response = await client.post(
+    """导入完的照片必须能在 `GET /photos` 里看到 —— 照片是底层数据。"""
+    await client.post(
         _IMPORT_URL,
         files=_upload(
-            _jpeg_bytes(dt_original=_T1, gps=HZ_GPS, color=(10, 20, 30)),
-            _jpeg_bytes(dt_original=_T2, gps=HZ_GPS, color=(20, 30, 40)),
-            _jpeg_bytes(dt_original=_T3, gps=HZ_GPS, color=(30, 40, 50)),
+            _jpeg_bytes(dt_original=_T2, gps=HZ_GPS, color=(10, 20, 30)),
+            _jpeg_bytes(dt_original=_T1, gps=HZ_GPS, color=(20, 30, 40)),
         ),
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["imported"] == 3
-    # 09:00 → 09:30 是同一趟；09:30 → 次日 10:00 隔 24.5h > 12h，切一刀
-    assert len(body["trip_ids"]) == 2
-
-    trips = (await client.get(_TRIPS_URL)).json()["trips"]
-    assert [trip["id"] for trip in trips] == body["trip_ids"]
-    assert [trip["item_count"] for trip in trips] == [2, 1]
-    assert [trip["title"] for trip in trips] == [
-        "2026-04-12 起的旅程",
-        "2026-04-13 起的旅程",
+    photos = (await client.get(_PHOTOS_URL)).json()
+    # 按拍摄时刻**倒序**：T2(09:30) 比 T1(09:00) 晚，所以 T2 在前
+    assert [photo["taken_at_local"] for photo in photos] == [
+        "2026-04-12T09:30:00",
+        "2026-04-12T09:00:00",
     ]
+    # 两张都有 GPS，has_location 必须为真
+    assert all(photo["has_location"] for photo in photos)
+    assert all(photo["location_source"] == "exif" for photo in photos)
 
 
 # ---------------------------------------------------------------- 行程列表
@@ -371,19 +373,38 @@ async def test_trips_are_empty_before_any_import(
     assert response.json() == {"trips": []}
 
 
-async def test_trips_list_carries_items_in_cluster_order(
+async def test_trips_list_preserves_assigned_order(
     client: httpx.AsyncClient, db_user, photo_import_enabled
 ) -> None:
-    """行程条目按 `ord`（= 时间升序）排列，且带坐标快照。
+    """行程条目按**分配时给定的顺序**排列，且带坐标快照。
+
+    ## 为什么顺序由前端定而不是后端排
+
+    阶段 7 之前行程是聚类产物，顺序按 `taken_at` 排（上传顺序不该影响结果）。
+    现在行程是用户手动组建的视图：他想让某张照片排第一，后端就该照办 ——
+    再按时间重排一次，等于把用户的排列意图悄悄改掉。
+    所以 `ord` 就是 `photo_ids` 的下标，后端不猜。
 
     顺序是行程路线本身：条目乱序 = 地图上一条乱走的线。
     """
+    imported = (
+        await client.post(
+            _IMPORT_URL,
+            files=_upload(
+                _jpeg_bytes(dt_original=_T2, gps=HZ_GPS, color=(10, 20, 30)),
+                _jpeg_bytes(dt_original=_T1, gps=HZ_GPS, color=(20, 30, 40)),
+            ),
+        )
+    ).json()["photos"]
+    by_time = {photo["taken_at_local"]: photo for photo in imported}
+    later = by_time["2026-04-12T09:30:00"]
+    earlier = by_time["2026-04-12T09:00:00"]
+
+    created = (await client.post(_TRIPS_URL, json={"title": "顺序测试"})).json()["trip"]
+    # 故意按"晚的在前"提交：后端必须照办，不能按时间重排
     await client.post(
-        _IMPORT_URL,
-        files=_upload(
-            _jpeg_bytes(dt_original=_T2, gps=HZ_GPS, color=(10, 20, 30)),
-            _jpeg_bytes(dt_original=_T1, gps=HZ_GPS, color=(20, 30, 40)),
-        ),
+        f"{_TRIPS_URL}/{created['id']}/photos",
+        json={"photo_ids": [later["id"], earlier["id"]]},
     )
 
     trips = (await client.get(_TRIPS_URL)).json()["trips"]
@@ -391,12 +412,14 @@ async def test_trips_list_carries_items_in_cluster_order(
     trip = trips[0]
 
     assert trip["item_count"] == 2
-    # 上传顺序是 09:30 在前，出来的顺序必须仍是 09:00 在前
     assert [item["taken_at"] for item in trip["items"]] == [
-        "2026-04-12T09:00:00+00:00",
         "2026-04-12T09:30:00+00:00",
+        "2026-04-12T09:00:00+00:00",
     ]
+    # 坐标快照：条目上带的是分配那一刻的值，不 join Photo 现取
     assert trip["items"][0]["lat"] == pytest.approx(30.2422, abs=1e-3)
+    # 起止时间由分配进去的照片决定（而不是创建时的 null）
     assert datetime.fromisoformat(trip["started_at"]) == datetime(2026, 4, 12, 9, 0, tzinfo=UTC)
     assert datetime.fromisoformat(trip["ended_at"]) == datetime(2026, 4, 12, 9, 30, tzinfo=UTC)
-    assert trip["source"] == "cluster"
+    # 手动分配过的行程标成 manual，退出 rebuild_user_trips 的删除范围
+    assert trip["source"] == "manual"

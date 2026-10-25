@@ -66,12 +66,84 @@ class ImportedPhoto(BaseModel):
     lat: float | None = Field(default=None, description="WGS84 纬度；无 GPS 时为 null")
     lng: float | None = Field(default=None, description="WGS84 经度；无 GPS 时为 null")
     coord_system: str = Field(default="WGS84", description="坐标系，存储侧恒为 WGS84")
-    location_source: str | None = Field(default=None, description="位置来源：exif / none")
+    location_source: str | None = Field(default=None, description="位置来源：exif / user / none")
     location_confidence: float | None = Field(
-        default=None, description="位置置信度：EXIF 一手证据 0.9，无位置 0.0"
+        default=None, description="位置置信度：EXIF 0.9，用户补标 0.8，无位置 0.0"
     )
     semantic_tag: str | None = Field(default=None, description="六类语义标签之一；无证据时为 null")
     semantic_label: str | None = Field(default=None, description="语义标签的中文名")
+
+
+class PhotoListItem(BaseModel):
+    """照片库里的一行（`GET /api/v1/photos`）。
+
+    ## 为什么不复用 `ImportedPhoto`
+
+    导入回执描述的是"**这一次导入**发生了什么"，照片库描述的是"**库里都有什么**"。
+    两者的消费方不同：前者读完就丢，后者要长期展示并支持后续操作。
+    硬合成一个类型，将来给照片库加"所属行程数""是否已生成 caption"这类字段时，
+    会把导入回执一起撑大 —— 而回执是一次性的，撑大它纯属浪费。
+
+    ## `has_location` 为什么单独一个布尔字段
+
+    前端要的是"这张要不要显示未定位标签"，而不是拿 `lat` 判空再自己推一遍。
+    更关键的是：**只有 lat 没有 lng**（或反过来）是可能的脏数据，
+    `lat != null` 会让前端以为有坐标、渲染时又拿不到点。
+    后端按"两个都有"判定，前端拿一个布尔值就行。
+    """
+
+    id: str = Field(description="Photo 主键（UUID 字符串）")
+    hash: str = Field(description="内容指纹 sha256 hex")
+    taken_at: str | None = Field(default=None, description="拍摄时刻（UTC，ISO 8601）")
+    taken_at_local: str | None = Field(
+        default=None, description="拍摄地当地墙钟时间（ISO 8601，无时区）"
+    )
+    tz_name: str | None = Field(default=None, description="形如 UTC+08:00")
+    lat: float | None = Field(default=None, description="WGS84 纬度；未定位时为 null")
+    lng: float | None = Field(default=None, description="WGS84 经度；未定位时为 null")
+    coord_system: str = Field(default="WGS84", description="坐标系，存储侧恒为 WGS84")
+    location_source: str | None = Field(default=None, description="位置来源：exif / user / none")
+    has_location: bool = Field(description="是否已定位（lat 与 lng 都有值）")
+    location_confidence: float | None = Field(
+        default=None, description="位置置信度：EXIF 0.9，用户补标 0.8，无位置 0.0"
+    )
+    caption: str | None = Field(default=None, description="视觉模型生成的描述；未生成为 null")
+    created_at: str = Field(description="入库时间（UTC，ISO 8601）")
+
+
+class PhotoLocationUpdate(BaseModel):
+    """`PATCH /api/v1/photos/{id}/location` 的入参：用户手动补标坐标。
+
+    ## 为什么只收 lat/lng，不收 location_source
+
+    来源是**后端根据接口路径决定的事实**：走到这个接口就是用户补标，
+    写死 `user`。让客户端传 source，等于允许它自称 `exif` ——
+    那会骗过下游按置信度分级处理的逻辑（地理模糊半径就按它算）。
+
+    ## 为什么 lat/lng 有范围约束
+
+    纬度 ±90、经度 ±180 是**地理常识**而不是业务规则。放一个 999 进来，
+    地图会静默不渲染（高德对越界坐标的行为），用户看到的是"补标了但地图上什么都没有"。
+    """
+
+    lat: float = Field(ge=-90, le=90, description="WGS84 纬度")
+    lng: float = Field(ge=-180, le=180, description="WGS84 经度")
+
+
+class TripPhotosAssign(BaseModel):
+    """`POST /api/v1/trips/{id}/photos` 的入参：把一批照片关联进行程。
+
+    ## 为什么是"全量提交"而不是增量 add
+
+    调用方（前端）拿到的是"这个行程现在该有哪些照片"的完整快照，
+    由它去 diff 出"要删哪张、要加哪张"。后端只负责把结果设为目标状态，
+    不负责猜增量 —— 猜错一次就出现"我以为加了、其实没加"的幽灵条目，
+    而这种不一致在界面上看不出任何异常。
+    """
+
+    photo_ids: list[str] = Field(
+        min_length=1, description="要关联进本行程的照片 id（Photo 主键，UUID 字符串）"
+    )
 
 
 class ImportPhotosResult(BaseModel):
@@ -87,6 +159,13 @@ class ImportPhotosResult(BaseModel):
 
     `imported + duplicates + failed == 上传的文件数`，且三者互斥。
     这是本契约最有用的一条保证：前端可以据此直接断言"没有文件被静默吞掉"。
+
+    ## 为什么不再有 `trip_ids`
+
+    行程从"导入时自动聚类出来的派生数据"改成"用户手动组建的视图"之后，
+    导入这一步**不再产生任何行程**（见 `api/v1/photos.py` 的取舍说明）。
+    保留一个恒为 `[]` 的字段只会让前端继续写"导入后刷新行程"的死代码，
+    所以连同前端调用一起删掉。
     """
 
     imported: int = Field(description="本次新建的照片条数")
@@ -94,9 +173,6 @@ class ImportPhotosResult(BaseModel):
     failed: int = Field(description="解析失败（非图片 / 损坏）的文件数")
     photos: list[ImportedPhoto] = Field(
         default_factory=list, description="本次涉及的全部照片（含去重命中的旧记录）"
-    )
-    trip_ids: list[str] = Field(
-        default_factory=list, description="重建后该用户当前全部行程的 id（UUID 字符串）"
     )
 
 
@@ -202,10 +278,13 @@ class TripCreateResponse(BaseModel):
 __all__ = [
     "ImportPhotosResult",
     "ImportedPhoto",
+    "PhotoListItem",
+    "PhotoLocationUpdate",
     "TripCreateRequest",
     "TripCreateResponse",
     "TripItemView",
     "TripListResponse",
+    "TripPhotosAssign",
     "TripRenameRequest",
     "TripView",
     "iso_or_none",

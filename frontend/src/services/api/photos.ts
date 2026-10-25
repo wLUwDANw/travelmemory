@@ -106,6 +106,8 @@ export interface ImportPhotosResult {
   duplicates: number;
   failed: number;
   photos: ImportedPhoto[];
+  /** @deprecated 后端已不再返回 `trip_ids`（导入不产生行程，见阶段 7 的架构调整）。
+   *  字段保留是为了让既有调用点逐个迁移，迁移完成后删除。 */
   tripIds: string[];
 }
 
@@ -191,7 +193,9 @@ export async function importPhotos(
     duplicates: asCount(payload.duplicates),
     failed: asCount(payload.failed),
     photos: (payload.photos ?? []).map((item) => toImportedPhoto(item as RawImportedPhoto | null)),
-    tripIds: (payload.trip_ids ?? []).map((value) => asString(value) ?? ''),
+    // 后端不再回 trip_ids（导入不聚类）。给个空数组让既有调用点不炸，
+    // 但它们不该再读这个值 —— 行程由用户手动组建。
+    tripIds: [],
   };
 }
 
@@ -201,10 +205,148 @@ export interface RawImportPhotosResult {
   duplicates?: unknown;
   failed?: unknown;
   photos?: unknown[];
-  trip_ids?: unknown[];
 }
 
 function asCount(value: unknown): number {
   const parsed = asNumber(value);
   return parsed === null ? 0 : Math.trunc(parsed);
+}
+
+
+/** 照片库里的一张照片（后端 `GET /api/v1/photos` 的线格式）。
+ *
+ *  与 `ImportedPhoto` 分开的理由同 `trips.ts` 里的 `RawTripView`：
+ *  把 snake_case 与 camelCase 合成一个接口，就是在骗 TypeScript。
+ */
+export interface RawPhotoListItem {
+  id?: unknown;
+  hash?: unknown;
+  taken_at?: unknown;
+  taken_at_local?: unknown;
+  tz_name?: unknown;
+  lat?: unknown;
+  lng?: unknown;
+  coord_system?: unknown;
+  location_source?: unknown;
+  has_location?: unknown;
+  location_confidence?: unknown;
+  caption?: unknown;
+  created_at?: unknown;
+}
+
+/** 照片库里的一张照片（前端内部的 camelCase 形态）。 */
+export interface PhotoListItem {
+  id: string;
+  hash: string;
+  takenAt: string | null;
+  takenAtLocal: string | null;
+  tzName: string | null;
+  lat: number | null;
+  lng: number | null;
+  coordSystem: string;
+  locationSource: string | null;
+  /** 是否已定位。**用后端给的布尔值，不要自己拿 lat 判空**：
+   *  只有 lat 没有 lng 是可能的脏数据，判空会让 UI 显示"已定位"却画不出点。 */
+  hasLocation: boolean;
+  locationConfidence: number | null;
+  caption: string | null;
+  createdAt: string;
+}
+
+/** 线格式 → 前端形态。类型不对一律折成 null/默认值，不放 undefined 渗进下游。 */
+export function toPhotoListItem(raw: RawPhotoListItem | null | undefined): PhotoListItem {
+  const source: RawPhotoListItem = raw ?? {};
+  return {
+    id: asString(source.id) ?? '',
+    hash: asString(source.hash) ?? '',
+    takenAt: asString(source.taken_at),
+    takenAtLocal: asString(source.taken_at_local),
+    tzName: asString(source.tz_name),
+    lat: asNumber(source.lat),
+    lng: asNumber(source.lng),
+    coordSystem: asString(source.coord_system) ?? 'WGS84',
+    locationSource: asString(source.location_source),
+    hasLocation: source.has_location === true,
+    locationConfidence: asNumber(source.location_confidence),
+    caption: asString(source.caption),
+    createdAt: asString(source.created_at) ?? '',
+  };
+}
+
+/**
+ * 拉照片库（`GET /api/v1/photos`），按拍摄时刻倒序。
+ *
+ * ## 为什么空列表是正常结果
+ *
+ * 还没导入过照片时后端返回 `[]`，那是数据状态不是错误。
+ * 调用方（照片库面板）要的是"有几张、哪些没定位"，不是一个异常。
+ *
+ * ## 为什么 `limit` 有上限
+ *
+ * 照片库是翻看型界面，一次把几千行连缩略图路径一起送回，
+ * 前端渲染和网络都要白等一轮。超上限由后端 422 挡下。
+ */
+export async function listPhotos(options?: PhotosApiOptions): Promise<PhotoListItem[]> {
+  const url = `${resolveBaseUrl(options)}/api/v1/photos`;
+  let response: Response;
+  try {
+    response = await resolveFetch(options)(url, { method: 'GET' });
+  } catch (err) {
+    throw new Error(`获取照片库失败：网络请求异常（${describeError(err)}）`);
+  }
+
+  if (!response.ok) {
+    const body = excerpt(await response.text());
+    throw new Error(`获取照片库失败：HTTP ${response.status}${body ? ` —— ${body}` : ''}`);
+  }
+
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload)) return [];
+  return payload.map((item) => toPhotoListItem(item as RawPhotoListItem | null));
+}
+
+/**
+ * 给一张照片补标坐标（`PATCH /api/v1/photos/{id}/location`）。
+ *
+ * ## 为什么坐标范围由后端校验
+ *
+ * 纬度 ±90、经度 ±180 是地理常识。放一个 999 进来，高德会**静默不渲染**，
+ * 用户看到的是"补标了但地图上什么都没有"，而这种失败没有任何报错。
+ * 前端也校验（`PhotoLocationDialog`），但两端都验：后端是真相，前端是即时反馈。
+ *
+ * ## 为什么 422 的错误信息要说人话
+ *
+ * 后端把 Pydantic 的字段错误折成了一句中文（见 `api/v1/photos.py`），
+ * 这里原样带进 `Error.message`，调用方直接弹给用户就能看懂。
+ */
+export async function patchPhotoLocation(
+  photoId: string,
+  lat: number,
+  lng: number,
+  options?: PhotosApiOptions,
+): Promise<PhotoListItem> {
+  const url = `${resolveBaseUrl(options)}/api/v1/photos/${encodeURIComponent(
+    photoId,
+  )}/location`;
+  let response: Response;
+  try {
+    response = await resolveFetch(options)(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng }),
+    });
+  } catch (err) {
+    throw new Error(`坐标补标失败：网络请求异常（${describeError(err)}）`);
+  }
+
+  if (response.status === 404) {
+    throw new Error('坐标补标失败：照片不存在，或后端尚未启用照片导入能力');
+  }
+  if (!response.ok) {
+    const body = excerpt(await response.text());
+    throw new Error(`坐标补标失败：HTTP ${response.status}${body ? ` —— ${body}` : ''}`);
+  }
+
+  const payload = (await response.json()) as RawPhotoListItem;
+  return toPhotoListItem(payload);
 }

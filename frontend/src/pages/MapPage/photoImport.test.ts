@@ -17,7 +17,7 @@ import {
   filterImageFiles,
   reduceImportState,
 } from './photoImport';
-import { countTripPhotos, tripPointsFromTrips } from './tripPoints';
+import { tripPointsFromTrips } from './tripPoints';
 import type { TripView } from '../../services/api/trips';
 
 function result(overrides: Partial<ImportPhotosResult> = {}): ImportPhotosResult {
@@ -240,14 +240,8 @@ describe('行程 → 地图点', () => {
     expect(tripPointsFromTrips([trip])[1].name).toBe('洛阳两日');
   });
 
-  it('计数区分「总数」与「上地图的张数」', () => {
-    expect(countTripPhotos([trip])).toEqual({ total: 3, onMap: 2 });
-    expect(countTripPhotos([])).toEqual({ total: 0, onMap: 0 });
-  });
-
   it('同一张照片挂在两条行程里只算一次', () => {
     const shared = { ...trip, id: 't2', items: [trip.items[0]] };
-    expect(countTripPhotos([trip, shared])).toEqual({ total: 3, onMap: 2 });
     expect(tripPointsFromTrips([trip, shared])).toHaveLength(2);
   });
 });

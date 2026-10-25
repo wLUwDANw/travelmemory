@@ -48,11 +48,17 @@ logger = get_logger(__name__)
 
 #: 位置来源：EXIF 里读到 GPS
 LOCATION_SOURCE_EXIF = "exif"
+#: 位置来源：用户在地图上手动补标（阶段 7 的位置补标闭环）
+LOCATION_SOURCE_USER = "user"
 #: 位置来源：完全没有位置信息
 LOCATION_SOURCE_NONE = "none"
 
 #: 位置置信度：EXIF GPS 是设备直接记录的一手证据，给 0.9 而不是 1.0
 LOCATION_CONFIDENCE_EXIF = 0.9
+#: 位置置信度：用户在地图上亲手点的，是**当事人陈述**而非设备记录。
+#: 比 EXIF 低一档（0.8）：用户可能记错、可能手滑点到隔壁街区，
+#: 而这个值会进地理模糊的半径计算，虚高会让"承诺半径"名不副实。
+LOCATION_CONFIDENCE_USER = 0.8
 #: 位置置信度：无位置信息
 LOCATION_CONFIDENCE_NONE = 0.0
 
@@ -520,8 +526,10 @@ __all__ = [
     "COORD_SYSTEM_WGS84",
     "LOCATION_CONFIDENCE_EXIF",
     "LOCATION_CONFIDENCE_NONE",
+    "LOCATION_CONFIDENCE_USER",
     "LOCATION_SOURCE_EXIF",
     "LOCATION_SOURCE_NONE",
+    "LOCATION_SOURCE_USER",
     "TZ_SOURCE_EXIF",
     "TZ_SOURCE_UNKNOWN",
     "ImportedPhotoRecord",

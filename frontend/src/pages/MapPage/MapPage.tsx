@@ -38,6 +38,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { BadgeCheck, ChevronLeft, Route, ShieldCheck, Sparkles } from 'lucide-react';
 
+import type { PhotoListItem } from '../../services/api/photos';
 import type { TripView } from '../../services/api/trips';
 import type { UnpackedPlace } from '../../types/share';
 import { Badge } from '../../components/ui/badge';
@@ -56,14 +57,16 @@ import {
   toggleLayer,
   type LayerVisibility,
 } from './layers';
-import { countTripPhotos, tripPointsFromTrips } from './tripPoints';
+import { tripPointsFromTrips } from './tripPoints';
 
 export interface MapPageProps {
   /** 信物解包结果里的全部地点（已过验签）。坐标是 WGS84（模糊后）。 */
   sharePlaces?: readonly UnpackedPlace[];
   /** 后端行程列表。每个 item 里带坐标的会进「我的照片」图层。 */
   trips?: readonly TripView[];
-  /** 导入/新建成功后通知上层刷新行程列表。 */
+  /** 照片库（阶段 7：照片是底层数据，行程只是视图）。 */
+  photos?: readonly PhotoListItem[];
+  /** 导入/新建/分配/删除成功后通知上层刷新数据。 */
   onTripsChanged?: () => void | Promise<void>;
   /** 信物解出的地点 → 上地图画模糊圈（由 App 持有状态）。 */
   onViewOnMap?: (places: UnpackedPlace[]) => void;
@@ -73,7 +76,13 @@ export interface MapPageProps {
 const AMAP_JS_KEY = import.meta.env.VITE_AMAP_JS_KEY ?? '';
 const AMAP_SECURITY_CODE = import.meta.env.VITE_AMAP_SECURITY_CODE ?? '';
 
-export function MapPage({ sharePlaces = [], trips = [], onTripsChanged, onViewOnMap }: MapPageProps) {
+export function MapPage({
+  sharePlaces = [],
+  trips = [],
+  photos = [],
+  onTripsChanged,
+  onViewOnMap,
+}: MapPageProps) {
   const [visibility, setVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const [tripDrawerOpen, setTripDrawerOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -92,7 +101,8 @@ export function MapPage({ sharePlaces = [], trips = [], onTripsChanged, onViewOn
   // 可见点数 / 已隐藏点数都来自纯逻辑层，UI 不自己数一遍
   const plan = useMemo(() => planMapRender(points, visibility), [points, visibility]);
   const shareCount = useMemo(() => points.filter((p) => p.source === 'share').length, [points]);
-  const photoCounts = useMemo(() => countTripPhotos(trips), [trips]);
+  // 照片总数直接数照片库，不再从行程反推 —— 阶段 7 之后照片可以不属于任何行程
+  const photoTotal = photos.length;
 
   /** 导入/新建完成：先让上层刷新数据，再请求地图飞过去。
    *  顺序不能反 —— 飞行的依据是新数据算出来的覆盖物。 */
@@ -222,12 +232,15 @@ export function MapPage({ sharePlaces = [], trips = [], onTripsChanged, onViewOn
           </SheetHeader>
           <TripDrawer
             trips={trips}
+            photos={photos}
             visibility={visibility}
             onToggleLayer={(layer) => setVisibility((v) => toggleLayer(v, layer))}
             shareCount={shareCount}
             onTripsChanged={handleTripsChanged}
             selectedTripId={selectedTripId}
             onSelectTrip={setSelectedTripId}
+            jsKey={AMAP_JS_KEY}
+            securityCode={AMAP_SECURITY_CODE}
           />
         </SheetContent>
       </Sheet>
@@ -266,7 +279,7 @@ export function MapPage({ sharePlaces = [], trips = [], onTripsChanged, onViewOn
             可见 <span className="font-semibold text-foreground">{plan.items.length}</span> 个点
           </span>
           <span className="text-border">|</span>
-          <span>照片 {photoCounts.onMap}</span>
+          <span>照片 {photoTotal}</span>
           {plan.hidden > 0 && <Badge variant="muted">已隐藏 {plan.hidden}</Badge>}
         </div>
       </div>

@@ -43,6 +43,7 @@ from app.schemas.trip import (
     TripCreateResponse,
     TripItemView,
     TripListResponse,
+    TripPhotosAssign,
     TripRenameRequest,
     TripView,
     iso_or_none,
@@ -50,8 +51,11 @@ from app.schemas.trip import (
 from app.services.trip_service import (
     TripItemSnapshot,
     TripSnapshot,
+    assign_photos_to_trip,
     create_manual_trip,
+    delete_user_trip,
     list_user_trips,
+    remove_photo_from_trip,
     rename_user_trip,
     semantic_tag_for_photo,
 )
@@ -214,3 +218,136 @@ async def rename_trip(trip_id: uuid.UUID, req: TripRenameRequest) -> TripCreateR
             items=[],
         )
     )
+
+
+@router.delete(
+    "/{trip_id}",
+    summary="删除一趟行程（不触碰照片）",
+    status_code=204,
+)
+async def delete_trip(trip_id: uuid.UUID) -> None:
+    """删掉这趟行程，**照片一条不少**。
+
+    ## 为什么这是 204 而不是带响应体的 200
+
+    删除成功后调用方要做的只有"把它从列表里去掉"，没有任何需要回传的值。
+    带一个 `{"deleted": true}` 的响应体，前端就多一处要解析的形状，
+    而那个布尔值它本来就知道（它刚发起了删除）。
+
+    ## 为什么照片绝对安全
+
+    `Trip` / `TripItem` 是**派生表**，`Photo` 是数据源。
+    本接口只 `delete(Trip)`，`TripItem` 由 `trip_id` 外键的 `ondelete=CASCADE`
+    自动带走；`photo` 表从头到尾没有任何写操作。
+    这是 `models/trip.py` 模块 docstring 里那条纪律的接口层体现：
+    "重跑一次聚类"与"删掉一趟行程"都绝不应该变成"照片全没了"。
+
+    注意外键方向不要看反：`TripItem.photo_id` 的 CASCADE 是
+    "删照片时带走关联"，与这里的"删行程不碰照片"是两个方向。
+
+    ## 404 的理由同 PATCH
+
+    找不到的与"不属于你"的对调用方是同一件事，都该让你删不了。
+    用 403 会免费送一个枚举接口。
+    """
+    if not is_enabled("photo_import"):
+        raise HTTPException(status_code=404, detail="该能力未启用")
+
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        deleted = await delete_user_trip(session, user_id=user.id, trip_id=trip_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="行程不存在")
+        await session.commit()
+
+
+@router.post(
+    "/{trip_id}/photos",
+    summary="把一批照片关联进行程（全量快照）",
+    response_model=TripCreateResponse,
+)
+async def assign_trip_photos(trip_id: uuid.UUID, req: TripPhotosAssign) -> TripCreateResponse:
+    """把这个行程的照片集合设成目标快照。
+
+    ## 为什么是"设为目标状态"而不是"加这几张"
+
+    前端持有这个行程的完整照片列表，由它 diff 出该加谁该删谁。
+    后端猜增量的代价是幽灵条目（"我以为加了、其实没加"），
+    而这种不一致在界面上没有任何异常表现。详见
+    `services/trip_service.py::assign_photos_to_trip`。
+
+    ## 为什么响应只回一条精简行程
+
+    调用方刚提交完整个列表，它知道自己设成了什么。
+    要刷新展示就再调一次 `GET /trips` —— 把全量行程塞进保存响应，
+    会让"保存成功"和"列表刷新"在前端共用一个状态位。
+
+    ## 为什么 source 会变成 manual
+
+    用户手动整理过的行程与聚类出来的已经是两回事，标成 manual
+    让它退出 `rebuild_user_trips()` 的删除范围。代价是这趟不再随
+    导入自动更新，收益是用户挑的结果不被冲掉。
+    """
+    if not is_enabled("photo_import"):
+        raise HTTPException(status_code=404, detail="该能力未启用")
+
+    photo_ids: list[uuid.UUID] = []
+    for raw in req.photo_ids:
+        try:
+            photo_ids.append(uuid.UUID(raw))
+        except ValueError as exc:
+            # 畸形 id 当不存在处理，理由同 PATCH 的 404 取舍
+            raise HTTPException(status_code=404, detail="照片不存在") from exc
+
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        trip = await assign_photos_to_trip(
+            session, user_id=user.id, trip_id=trip_id, photo_ids=photo_ids
+        )
+        if trip is None:
+            raise HTTPException(status_code=404, detail="行程不存在")
+        await session.commit()
+
+    return TripCreateResponse(
+        trip=TripView(
+            id=str(trip.id),
+            title=trip.title,
+            started_at=iso_or_none(trip.started_at),
+            ended_at=iso_or_none(trip.ended_at),
+            source=trip.source,
+            item_count=len(photo_ids),
+            items=[],
+        )
+    )
+
+
+@router.delete(
+    "/{trip_id}/photos/{photo_id}",
+    summary="把一张照片从行程里移除（不删照片）",
+    status_code=204,
+)
+async def remove_trip_photo(trip_id: uuid.UUID, photo_id: uuid.UUID) -> None:
+    """解除这张照片与这趟行程的关联，**照片本身留在库里**。
+
+    ## 为什么"照片本就不在这趟"也返回 204
+
+    调用方想让它不在，结果确实是"不在"—— 目的达成。
+    再分一个"本来就不在"的状态，只会让前端多写一个永远走不到的分支。
+
+    ## 为什么不需要重算行程的起止时间
+
+    移除一张照片不会让"这趟从哪天到哪天"变成另一个答案
+    （边界由剩下的照片决定，下次保存时会重算）。为了一个
+    下次就会被覆盖的中间值在这里多做一次全量扫描，不值得。
+    """
+    if not is_enabled("photo_import"):
+        raise HTTPException(status_code=404, detail="该能力未启用")
+
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        removed = await remove_photo_from_trip(
+            session, user_id=user.id, trip_id=trip_id, photo_id=photo_id
+        )
+        if not removed:
+            raise HTTPException(status_code=404, detail="行程不存在")
+        await session.commit()

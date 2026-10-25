@@ -39,28 +39,3 @@ export function tripPointsFromTrips(trips: readonly TripView[]): MapPointInput[]
   }
   return points;
 }
-
-export interface TripPhotoCounts {
-  /** 行程里的照片总数（含没有坐标的）。 */
-  total: number;
-  /** 其中有坐标、真正能上地图的张数。 */
-  onMap: number;
-}
-
-/** 统计照片数。两个口径都要：面板上的 Badge 显示"这一图层有几个点"，
- *  下面一行小字要说明"其实一共导了多少张"，否则用户会以为没坐标的那些丢了。 */
-export function countTripPhotos(trips: readonly TripView[]): TripPhotoCounts {
-  let total = 0;
-  let onMap = 0;
-  const seen = new Set<string>();
-
-  for (const trip of trips) {
-    for (const item of trip.items) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      total += 1;
-      if (typeof item.lat === 'number' && typeof item.lng === 'number') onMap += 1;
-    }
-  }
-  return { total, onMap };
-}

@@ -43,10 +43,13 @@ from datetime import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.models.photo import Photo
 from app.models.trip import TRIP_SOURCE_CLUSTER, TRIP_SOURCE_MANUAL, Trip, TripItem
 from app.services.semantic_service import classify_place
 from app.services.trip_cluster import ClusterConfig, cluster_trips_from_photos
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -288,6 +291,178 @@ async def rebuild_user_trips(
     )
 
 
+async def assign_photos_to_trip(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    trip_id: uuid.UUID,
+    photo_ids: list[uuid.UUID],
+) -> Trip | None:
+    """把行程的照片集合设成目标快照（全量提交，不是增量 add）。
+
+    ## 为什么是"设为目标状态"而不是"加这几张"
+
+    前端持有这个行程的完整照片列表，它去 diff 出"该加谁该删谁"。
+    后端只负责把结果落成目标状态 —— 猜增量的代价是幽灵条目：
+    "我以为加了、其实没加"，而这种不一致在界面上没有任何异常表现，
+    只在地图上表现为"这趟怎么多了一张"。
+
+    ## 为什么照片可以来自别的行程
+
+    一张照片同时属于两趟行程是**合法的**（用户在两个视图里都想看到它）。
+    所以这里不检查 photo 是否已被别的行程占用，只按 `photo_id` 建立关联。
+
+    ## 为什么顺手刷 `source`
+
+    用户手动整理过的行程与聚类出来的已经是两回事，标成 `manual`
+    让它退出 `rebuild_user_trips()` 的删除范围（那条只删 `cluster`）。
+    否则下一次重建会把这些手动挑选的结果冲掉。
+
+    ## 为什么照片不存在时跳过而不是报错
+
+    调用方传来一个已删除的 photo_id 时，报 422 会让整个保存动作失败 ——
+    用户只是想"把这趟存成现在这样"，不该因为列表里混了一条过期 id 就存不了。
+    跳过 + 在日志里记下，比让用户重来一次更合理。
+
+    调用方负责提交事务。
+    """
+    trip = await session.get(Trip, trip_id)
+    if trip is None or trip.user_id != user_id:
+        return None
+
+    # 只保留真实存在且属于该用户的照片（顺序即传入顺序，前端已按需排好）
+    valid = (
+        (
+            await session.execute(
+                select(Photo.id).where(
+                    Photo.id.in_(photo_ids), Photo.user_id == user_id, Photo.deleted_at.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    valid_set = {row for row in valid}
+    dropped = [str(pid) for pid in photo_ids if pid not in valid_set]
+    if dropped:
+        logger.warning("assign_photos: 跳过 %d 个不存在/已删除的照片: %s", len(dropped), dropped)
+
+    # 先删后插：与 rebuild_user_trips 同一套做法。trip_item 是**关联表**，
+    # 它的全部内容都能由 (trip_id, photo_ids) 重算，删掉不损失任何信息。
+    await session.execute(delete(TripItem).where(TripItem.trip_id == trip.id))
+
+    photos = (
+        (
+            await session.execute(
+                select(Photo).where(
+                    Photo.id.in_(photo_ids), Photo.user_id == user_id, Photo.deleted_at.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_id = {photo.id: photo for photo in photos}
+    for position, photo_id in enumerate(photo_ids):
+        photo = by_id.get(photo_id)
+        if photo is None:
+            continue
+        session.add(
+            TripItem(
+                trip_id=trip.id,
+                photo_id=photo.id,
+                # 快照语义与聚类落库一致：存当时的值，而不是 join Photo 现取。
+                # 用户补标坐标后，行程里的旧值要等他重新保存才更新 ——
+                # 否则"地图上的点在自己没动的时候跳了一下"。
+                taken_at=photo.taken_at,
+                lat=photo.lat,
+                lng=photo.lng,
+                ord=position,
+            )
+        )
+
+    trip.source = TRIP_SOURCE_MANUAL
+    trip.started_at = _earliest(photos)
+    trip.ended_at = _latest(photos)
+    await session.flush()
+    return trip
+
+
+async def remove_photo_from_trip(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    trip_id: uuid.UUID,
+    photo_id: uuid.UUID,
+) -> bool:
+    """把一张照片从行程里移除（只删 `TripItem` 关联，**绝不碰 `photo` 表**）。
+
+    返回 False 表示行程不存在 / 不属于该用户 / 该照片本就不在这趟行程里。
+    第三种情况也返回 False：调用方想让它不在，结果确实是"不在"，
+    再分一个"本来就不在"的状态只会让前端多写一个用不上的分支。
+
+    调用方负责提交事务。
+    """
+    trip = await session.get(Trip, trip_id)
+    if trip is None or trip.user_id != user_id:
+        return False
+
+    # 先查在不在：既避开 `Result.rowcount` 在类型桩上的归属问题，
+    # 也让"返回 False 的三种情况"有一个统一的判据。
+    existing = await session.execute(
+        select(TripItem.id).where(TripItem.trip_id == trip.id, TripItem.photo_id == photo_id)
+    )
+    if existing.scalar_one_or_none() is None:
+        return False
+
+    await session.execute(
+        delete(TripItem).where(TripItem.trip_id == trip.id, TripItem.photo_id == photo_id)
+    )
+    await session.flush()
+    return True
+
+
+async def delete_user_trip(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    trip_id: uuid.UUID,
+) -> bool:
+    """删掉一趟行程（连同它的 `TripItem` 关联），**绝不触碰 `photo` 表**。
+
+    ## 这是本模块最重要的一条纪律
+
+    `Trip` / `TripItem` 是**派生表**：它们的全部内容都能由 `Photo` 重算。
+    `Photo` 是数据源，删了不可恢复。所以本函数只 `delete(Trip)` ——
+    `TripItem` 由 `trip_id` 外键的 `ondelete="CASCADE"` 自动带走，
+    而 `photo` 表从头到尾没有任何写操作。
+
+    `models/trip.py` 里 `photo_id` 的外键也是 `CASCADE`，方向是
+    "删照片时带走关联"，与这里的"删行程不碰照片"是两个方向，不要看反。
+
+    调用方负责提交事务。
+    """
+    trip = await session.get(Trip, trip_id)
+    if trip is None or trip.user_id != user_id:
+        return False
+
+    await session.delete(trip)
+    await session.flush()
+    return True
+
+
+def _earliest(photos: Sequence[Photo]) -> datetime | None:
+    """一批照片里最早的拍摄时刻；全都没时间时为 None。"""
+    values = [photo.taken_at for photo in photos if photo.taken_at is not None]
+    return min(values) if values else None
+
+
+def _latest(photos: Sequence[Photo]) -> datetime | None:
+    """一批照片里最晚的拍摄时刻；全都没时间时为 None。"""
+    values = [photo.taken_at for photo in photos if photo.taken_at is not None]
+    return max(values) if values else None
+
+
 async def list_user_trips(
     session: AsyncSession, *, user_id: uuid.UUID
 ) -> list[TripSnapshot]:
@@ -344,8 +519,12 @@ async def _photos_by_id(
 __all__ = [
     "TripItemSnapshot",
     "TripSnapshot",
+    "assign_photos_to_trip",
     "create_manual_trip",
+    "delete_user_trip",
     "list_user_trips",
     "rebuild_user_trips",
+    "remove_photo_from_trip",
+    "rename_user_trip",
     "semantic_tag_for_photo",
 ]

@@ -257,3 +257,108 @@ export async function renameTrip(
   const payload = (await response.json()) as Partial<RawTripCreateResponse>;
   return toTripView(payload.trip as RawTripView | null);
 }
+
+/**
+ * 删除一趟行程（`DELETE /api/v1/trips/{id}`）。**照片一条不少。**
+ *
+ * ## 为什么前端不需要做任何本地清理
+ *
+ * 后端只删 `Trip` 与 `TripItem`（外键 CASCADE 带走关联），`photo` 表
+ * 从头到尾没有写操作。所以删完之后照片库与地图上的照片点都还在 ——
+ * 前端只要把这一趟从列表里去掉，别的什么都不用动。
+ *
+ * 这也是为什么这个函数**不返回照片列表**：调用方要知道"照片还在"，
+ * 重新拉一次 `GET /photos` 就是了，让删除响应兼作数据源只会把两件事耦在一起。
+ */
+export async function deleteTrip(id: string, options?: TripsApiOptions): Promise<void> {
+  const url = `${resolveBaseUrl(options)}/api/v1/trips/${encodeURIComponent(id)}`;
+  let response: Response;
+  try {
+    response = await resolveFetch(options)(url, { method: 'DELETE' });
+  } catch (err) {
+    throw new Error(`删除行程失败：网络请求异常（${describeError(err)}）`);
+  }
+
+  if (response.status === 404) {
+    throw new Error('删除行程失败：该行程不存在，或后端尚未启用照片导入能力');
+  }
+  // 204 是成功：没有响应体要读。但非 2xx 仍要抛，否则"删掉了"是个本地幻觉
+  if (!response.ok && response.status !== 204) {
+    const body = excerpt(await response.text());
+    throw new Error(`删除行程失败：HTTP ${response.status}${body ? ` —— ${body}` : ''}`);
+  }
+}
+
+/**
+ * 把一批照片设成行程的目标快照（`POST /api/v1/trips/{id}/photos`）。
+ *
+ * ## 为什么是"全量快照"而不是"加这几张"
+ *
+ * 前端持有这个行程的完整照片列表，由它 diff 出该加谁该删谁。
+ * 后端猜增量的代价是幽灵条目（"我以为加了、其实没加"），
+ * 而这种不一致在界面上没有任何异常表现。详见服务层 docstring。
+ *
+ * ## 为什么顺序重要
+ *
+ * `ord` 就是传入顺序：用户想让哪张排第一，后端就照办。
+ * 阶段 7 之前行程是聚类产物、按时间排；现在是用户手动组建的视图，
+ * 再按时间重排一次等于把用户的排列意图悄悄改掉。
+ */
+export async function assignTripPhotos(
+  tripId: string,
+  photoIds: readonly string[],
+  options?: TripsApiOptions,
+): Promise<TripView> {
+  const url = `${resolveBaseUrl(options)}/api/v1/trips/${encodeURIComponent(tripId)}/photos`;
+  let response: Response;
+  try {
+    response = await resolveFetch(options)(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photo_ids: photoIds }),
+    });
+  } catch (err) {
+    throw new Error(`保存行程失败：网络请求异常（${describeError(err)}）`);
+  }
+
+  if (response.status === 404) {
+    throw new Error('保存行程失败：该行程或某张照片不存在');
+  }
+  if (!response.ok) {
+    const body = excerpt(await response.text());
+    throw new Error(`保存行程失败：HTTP ${response.status}${body ? ` —— ${body}` : ''}`);
+  }
+
+  const payload = (await response.json()) as Partial<RawTripCreateResponse>;
+  return toTripView(payload.trip as RawTripView | null);
+}
+
+/**
+ * 把一张照片从行程里移除（`DELETE /api/v1/trips/{id}/photos/{photoId}`）。
+ * **只解除关联，照片本身留在库里。**
+ *
+ * 后端对"照片本就不在这趟"也返回 204：调用方想让它不在，结果确实是不在。
+ */
+export async function removeTripPhoto(
+  tripId: string,
+  photoId: string,
+  options?: TripsApiOptions,
+): Promise<void> {
+  const url = `${resolveBaseUrl(options)}/api/v1/trips/${encodeURIComponent(
+    tripId,
+  )}/photos/${encodeURIComponent(photoId)}`;
+  let response: Response;
+  try {
+    response = await resolveFetch(options)(url, { method: 'DELETE' });
+  } catch (err) {
+    throw new Error(`移除照片失败：网络请求异常（${describeError(err)}）`);
+  }
+
+  if (response.status === 404) {
+    throw new Error('移除照片失败：该行程不存在');
+  }
+  if (!response.ok && response.status !== 204) {
+    const body = excerpt(await response.text());
+    throw new Error(`移除照片失败：HTTP ${response.status}${body ? ` —— ${body}` : ''}`);
+  }
+}

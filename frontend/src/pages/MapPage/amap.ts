@@ -23,7 +23,6 @@ export interface AmapNamespace {
   Marker: new (options: Record<string, unknown>) => AmapOverlay;
   Circle: new (options: Record<string, unknown>) => AmapOverlay;
 }
-
 export interface AmapMap {
   setCenter(center: [number, number]): void;
   setZoom(zoom: number): void;
@@ -35,8 +34,8 @@ export interface AmapMap {
   add(overlay: AmapOverlay | AmapOverlay[]): void;
   remove(overlay: AmapOverlay | AmapOverlay[]): void;
   destroy(): void;
-  on(event: string, handler: () => void): void;
-  off(event: string, handler: () => void): void;
+  on(event: string, handler: (event: unknown) => void): void;
+  off(event: string, handler: (event: unknown) => void): void;
 }
 
 export interface AmapOverlay {
