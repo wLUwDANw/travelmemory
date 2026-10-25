@@ -223,3 +223,89 @@ async def test_rebuild_receipt_matches_the_list_order(db_user: str) -> None:
         await session.commit()
 
         assert [trip.id for trip in rebuilt] == [snapshot.trip.id for snapshot in listed]
+
+
+# ---------------------------------------------------------------- 重命名（PATCH）
+
+
+def test_patch_route_is_registered() -> None:
+    """`PATCH /api/v1/trips/{id}` 必须真的挂上。"""
+    paths = app.openapi()["paths"]
+    key = f"{_TRIPS_URL}/{{trip_id}}"
+    assert key in paths, f"行程明细路由没挂上：{list(paths)}"
+    assert "patch" in paths[key], f"只有 {list(paths[key])}，缺 patch"
+
+
+async def test_patch_disabled_flag_returns_404(
+    client: httpx.AsyncClient, photo_import_disabled
+) -> None:
+    """未启用 → 404，与 POST / GET 完全一致（三个接口共用一个开关）。"""
+    response = await client.patch(f"{_TRIPS_URL}/{uuid.uuid4()}", json={"title": "新名字"})
+    assert response.status_code == 404
+    assert response.json()["detail"] != "Not Found"
+
+
+async def test_patch_blank_title_returns_422(
+    client: httpx.AsyncClient, photo_import_enabled
+) -> None:
+    """纯空白标题 → 422。和创建走同一条理由：`min_length` 挡不住 `"   "`。"""
+    response = await client.patch(f"{_TRIPS_URL}/{uuid.uuid4()}", json={"title": "   "})
+    assert response.status_code == 422
+
+
+async def test_patch_unknown_id_returns_404(
+    client: httpx.AsyncClient, photo_import_enabled, db_user: str
+) -> None:
+    """不存在的 id → 404，**不是 403**。
+
+    403 会告诉外部"这个 id 确实存在，只是不属于你"，等于送一个枚举接口。
+    """
+    response = await client.patch(f"{_TRIPS_URL}/{uuid.uuid4()}", json={"title": "新名字"})
+    assert response.status_code == 404
+    assert response.json()["detail"] != "Not Found"
+
+
+async def test_rename_updates_title(
+    client: httpx.AsyncClient, photo_import_enabled, db_user: str
+) -> None:
+    """改名后：标题是剥过空白的新值，`GET /trips` 也跟着变。"""
+    created = (await client.post(_TRIPS_URL, json={"title": "洛阳两日"})).json()["trip"]
+
+    response = await client.patch(
+        f"{_TRIPS_URL}/{created['id']}", json={"title": "  龙门石窟三日  "}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["trip"]["title"] == "龙门石窟三日"
+
+    listed = {item["id"]: item for item in (await client.get(_TRIPS_URL)).json()["trips"]}
+    assert listed[created["id"]]["title"] == "龙门石窟三日"
+
+
+async def test_rename_promotes_cluster_trip_to_manual(
+    client: httpx.AsyncClient, photo_import_enabled, db_user: str
+) -> None:
+    """**本文件为 PATCH 写的最重要一条**：改名必须把 `source` 提升为 manual。
+
+    否则下一次导入触发的 `rebuild_user_trips()` 会按
+    `user_id + source == cluster` 把这行**连标题一起删掉**，
+    而这个 bug 不报错，只表现为"我给旅程改的名字又变回日期了"。
+    """
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        trip = await create_manual_trip(session, user_id=user.id, title="临时")
+        # 伪装成聚类行程：模拟"用户想给一趟自动聚出来的旅程改名"
+        trip.source = "cluster"
+        await session.commit()
+        trip_id = trip.id
+
+    await client.patch(f"{_TRIPS_URL}/{trip_id}", json={"title": "洛阳两日"})
+
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        after = await rebuild_user_trips(session, user_id=user.id)
+        await session.commit()
+
+    renamed = [item for item in after if item.id == trip_id]
+    assert renamed, "改名后的行程被重建冲掉了"
+    assert renamed[0].title == "洛阳两日", "标题被重建回退了"
+    assert renamed[0].source == "manual"

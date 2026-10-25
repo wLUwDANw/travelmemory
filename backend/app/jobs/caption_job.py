@@ -38,18 +38,29 @@ class CaptionJob(BaseJob):
         session: AsyncSession,
         settings: Settings | None = None,
         vision: BaseVision | None = None,
+        *,
+        user_id: uuid.UUID | None = None,
     ) -> None:
         super().__init__(session, settings)
         self.vision = vision or build_vision(self.settings)
         # 模型版本参与幂等键：换模型 = 新的任务行 = 会重跑，旧结果仍可对比
         self.ai_model = self.vision.model_version
+        #: 限定只跑某个用户的照片。`None` = 全库（生产默认，也兼容既有调用方）。
+        #:
+        #: 为什么需要它：候选选取原本是全库全用户的，于是"这一批处理了几张"
+        #: 会随库里**别人**的 pending 照片数量浮动。测试因此没法写死计数
+        #: （演示库一有 pending 就红），而按用户跑批本身也是合理需求。
+        self.user_id = user_id
 
     async def candidate_photo_ids(self, *, limit: int, force: bool) -> list[uuid.UUID]:
         """挑候选：未删除、且（还没成功生成过 caption）的照片。
 
         force=True 时连 done 的也挑出来（换模型 / 想重生成时用）。
+        构造时传了 `user_id` 就只挑那个用户的。
         """
         stmt = select(Photo.id).where(Photo.deleted_at.is_(None))
+        if self.user_id is not None:
+            stmt = stmt.where(Photo.user_id == self.user_id)
         if not force:
             # 只要不是 done 的都算候选：pending（没跑过）与 failed（上次失败，等重试）
             stmt = stmt.where(Photo.ai_status != AI_DONE)

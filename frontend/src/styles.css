@@ -181,35 +181,15 @@ body {
   color: var(--danger);
 }
 
-.evidence {
-  font-size: 12px;
-}
 
-.evidence-toggle {
-  background: none;
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-size: 12px;
-  color: hsl(var(--muted));
-}
 
-.evidence-list {
-  margin: 8px 0 0;
-  padding-left: 20px;
-  color: hsl(var(--muted));
-}
 
-.evidence-list li {
-  margin-bottom: 8px;
-}
 
-.evidence-list p {
-  margin: 2px 0 0;
-  color: var(--text);
-  line-height: 1.6;
-}
+
+
+
+
+
 
 .composer {
   display: flex;
@@ -346,75 +326,18 @@ body {
   color: #6b7a90;
 }
 
-/* ---------------- 阶段 6：应用壳 + 地图 + 信物 ----------------
-   地图页必须撑满视口（高德容器要显式高度），所以 .app-main 不用
-   agent 页那套"居中窄列" —— 三页共用一个壳，布局差异在各页自己处理。 */
-
-.app-shell {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.app-nav {
-  display: flex;
-  gap: 4px;
-  padding: 8px 16px 0;
-  background: var(--panel);
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.app-nav button {
-  border: none;
-  background: transparent;
-  padding: 8px 14px;
-  font-size: 14px;
-  color: hsl(var(--muted));
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-
-.app-nav button.active {
-  color: hsl(var(--accent));
-  border-bottom-color: hsl(var(--accent));
-}
-
-.app-main {
-  flex: 1;
-  min-height: 0;
-}
-
-/* 地图页 */
-
-.map-page {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 45px);
-}
-
-.map-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-}
-
-.map-header h1 {
-  font-size: 18px;
-  margin: 0;
-}
-
-.layer-toggles {
-  display: flex;
-  gap: 16px;
-  font-size: 13px;
-  color: hsl(var(--muted));
-}
+/* ---------------- 阶段 7：全屏地图壳 ----------------
+   地图是**唯一底层**：高德容器必须撑满整个视口，所以这里不再有
+   "居中窄列"的页面容器，也不再有顶部 Tab 条。
+   原先那套（.app-shell / .app-nav / .app-main / .map-page / .map-header /
+   .layer-toggles / .map-footer）随 Tab 结构一起删除 —— 留着只会让人
+   以为还能改回去，而改回去要先和七个选择器搏斗。
+   对话框/抽屉里的内容用自己的容器类（如 .share-page）。 */
 
 .map-canvas-wrap {
   position: relative;
-  flex: 1;
-  min-height: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .map-canvas {
@@ -439,26 +362,53 @@ body {
   bottom: 44px;
 }
 
+/* 地图不可用（key 没配 / 脚本被墙）时铺满容器居中显示，
+   而不是像以前那样在页面中间飘一张小卡片 —— 那时地图还有边框，
+   现在没有东西可以"飘在中间"。 */
 .map-fallback {
-  margin: 24px auto;
-  max-width: 420px;
-  padding: 16px 20px;
-  border-radius: 10px;
-  border: 1px solid hsl(var(--border));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
   background: var(--panel);
 }
 
-.map-footer {
-  padding: 8px 16px;
+.map-fallback strong {
+  font-size: 15px;
+}
+
+.map-fallback p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: hsl(var(--muted));
+}
+
+.map-fallback .hint {
   font-size: 12px;
 }
 
 /* 信物页 */
 
+/* 信物分享内容。现在它住在 ShareDialog 里（不再是独立页面），
+   所以去掉"撑满一页"那套：外层对话框已经有 max-w-2xl 与滚动区，
+   这里只需要纵向节奏。底部留 24px 而不是 60px ——
+   滚动容器自带内边距，60px 只会让最后一张卡片离底边老远。 */
 .share-page {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 20px 16px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0 24px;
+}
+
+.share-page section {
+  margin: 0;
 }
 
 .share-header h1 {

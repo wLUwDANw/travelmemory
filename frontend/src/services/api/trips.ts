@@ -215,3 +215,45 @@ export async function createTrip(title: string, options?: TripsApiOptions): Prom
   const payload = (await response.json()) as Partial<RawTripCreateResponse>;
   return toTripView(payload.trip as RawTripView | null);
 }
+
+/**
+ * 重命名一趟行程（`PATCH /api/v1/trips/{id}`）。
+ *
+ * ## 为什么返回刷新后的那一条，而不是把入参回显
+ *
+ * 后端会把 `source` 从 `cluster` 提升成 `manual`（改名的行程从此退出自动重建，
+ * 否则下次导入会把用户敲的标题冲掉）。这个副作用**只有后端知道** ——
+ * 前端按入参拼一个返回值，就会在界面上继续显示"聚类"徽章，
+ * 而下一次导入后标题变了，用户完全看不出为什么。
+ *
+ * 404 的错误信息与 `createTrip` 同样翻译成人话：行程不存在与能力没开
+ * 都走这个码，而后者是**可预期的运营状态**。
+ */
+export async function renameTrip(
+  id: string,
+  title: string,
+  options?: TripsApiOptions,
+): Promise<TripView> {
+  const url = `${resolveBaseUrl(options)}/api/v1/trips/${encodeURIComponent(id)}`;
+  let response: Response;
+  try {
+    response = await resolveFetch(options)(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+  } catch (err) {
+    throw new Error(`重命名失败：网络请求异常（${describeError(err)}）`);
+  }
+
+  if (response.status === 404) {
+    throw new Error('重命名失败：该行程不存在，或后端尚未启用照片导入能力');
+  }
+  if (!response.ok) {
+    const body = excerpt(await response.text());
+    throw new Error(`重命名失败：HTTP ${response.status}${body ? ` —— ${body}` : ''}`);
+  }
+
+  const payload = (await response.json()) as Partial<RawTripCreateResponse>;
+  return toTripView(payload.trip as RawTripView | null);
+}

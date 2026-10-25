@@ -167,6 +167,24 @@ class TripCreateRequest(BaseModel):
     )
 
 
+class TripRenameRequest(BaseModel):
+    """`PATCH /api/v1/trips/{id}` 的入参：重命名一趟行程。
+
+    ## 为什么不复用 `TripCreateRequest`
+
+    两者的**失败语义不同**：创建时标题为空是"这次没建成"，
+    重命名时标题为空是"把名字改没了"。后者更糟 —— 用户会看到一行
+    没有标题的行程卡片，而且不知道刚才那次点击生效了没有。
+    分开两个类型，路由层的校验文案就能各说各话，不用在一个 `if` 里猜语境。
+    """
+
+    title: str = Field(
+        min_length=1,
+        max_length=128,
+        description="新的行程标题。首尾空白会被剥掉，剥完为空则 422",
+    )
+
+
 class TripCreateResponse(BaseModel):
     """`POST /api/v1/trips` 的响应：新建出来的那一条行程。
 
@@ -188,6 +206,7 @@ __all__ = [
     "TripCreateResponse",
     "TripItemView",
     "TripListResponse",
+    "TripRenameRequest",
     "TripView",
     "iso_or_none",
 ]

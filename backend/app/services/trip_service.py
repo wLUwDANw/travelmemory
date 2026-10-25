@@ -175,6 +175,42 @@ async def create_manual_trip(
     return trip
 
 
+async def rename_user_trip(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    trip_id: uuid.UUID,
+    title: str,
+) -> Trip | None:
+    """改一趟行程的标题。找不到（或不属于该用户）时返回 `None`。
+
+    ## 为什么聚类行程也能改名
+
+    聚合行程（`source = cluster`）的标题是后端按首张照片的日期**推导**出来的
+    （见 `_trip_title`），用户大概率想把它改成「洛阳两日」这种自己能认的名字。
+    所以这里**不按 source 区别对待** —— 那会让"能改名"变成一件说不清何时生效的事。
+
+    ## 为什么改名要把 source 提升为 manual
+
+    `rebuild_user_trips()` 重建时按 `user_id + source == cluster` **整批删了再插**
+    （见 `_delete_user_trips`）。被改过名的 cluster 行正落在这个删除范围里 ——
+    不改 source 的话，下次导入照片就会把用户敲的标题冲掉。
+    提升为 manual 的代价是这趟行程从此不再随新导入的照片自动更新，
+    收益是用户输入不丢。取舍依据同 `create_manual_trip`：
+    **派生数据可以让位，用户输入不行。**
+
+    调用方负责提交事务。
+    """
+    trip = await session.get(Trip, trip_id)
+    if trip is None or trip.user_id != user_id:
+        return None
+    trip.title = title
+    # 见 docstring：用户输入过的行程退出自动重建
+    trip.source = TRIP_SOURCE_MANUAL
+    await session.flush()
+    return trip
+
+
 async def rebuild_user_trips(
     session: AsyncSession,
     *,

@@ -1,32 +1,54 @@
-/** 地图相册页（阶段 6 UI）。
+/** 地图相册页 —— 产品化之后的**全屏地图壳**。
  *
- * ## 这一页现在做什么、不做什么
+ * ## 结构：地图是唯一的底层，其余全部叠在它上面
  *
- * 做：
- * - 渲染分享信物解出的地点：`radius > 0` → 半透明模糊圈，否则 Marker。
- *   这条红线由 `layers.ts` + `layers.test.ts` 锁死，本页只是把结果交给
- *   `MapCanvas` 执行；
- * - 渲染「我的照片」图层：后端 `GET /api/v1/trips` 回来的行程里有坐标的照片，
- *   由 `tripPoints.ts` 折成 `MapPointInput` 后追加进同一份渲染计划；
- * - 左上角悬浮操作面板：新建旅程（`POST /api/v1/trips`，真的建出一趟空行程）+
- *   导入照片（真实 file input → 上传 → 缩略图入库）+ 图层开关；
- * - 空态 / 降级态（key 没配、脚本没加载）由 `MapCanvas` 自己渲染，本页不接管。
+ * 阶段 6 之前这里是"顶部三个 Tab + 一块 70vh 的地图"，地图被关在一张卡片里。
+ * 旅忆地图的产品本质是**先看地图，再谈别的**，所以现在：
  *
- * 不做（留给人类 / 后续阶段）：
- * - 60fps 聚合渲染、视口裁剪、轨迹回放 —— 见 `docs/stages/stage6-map-album.md`；
- * - 行程的手工**编辑**（改标题、合并、拆分）：写入接口只有"新建"这一条，
- *   改与删还没有，所以 `CreateTripDialog` 只负责创建。
+ * ```
+ * ┌─────────────────────────────────────────────┐
+ * │  [旅忆地图 · 隐私模糊]          （左上品牌）  │
+ * │                                             │
+ * │           全屏高德地图（唯一底层）             │
+ * │                                    ┌────┐  │
+ * │                                    │行程 │ ← 右缘半圆 Tab
+ * │                                    └────┘  │
+ * │  [生成信物]                         (AI)   │
+ * │  [验证信物]                                │
+ * │  （左下工具栏）                    （右下 FAB）│
+ * └─────────────────────────────────────────────┘
+ * ```
+ *
+ * ## 三个浮层互斥
+ *
+ * 行程抽屉、AI 抽屉、信物对话框**同时只开一个**。不是为了"设计简洁"：
+ * 可视区域就那么大，两个抽屉各占 400px 就把地图挤成一条缝，
+ * 而用户此刻正需要看着地图判断"这个行程落在哪"。
+ *
+ * ## 为什么 fitBounds 用计数器而不是 ref 命令
+ *
+ * 见 `MapCanvas.tsx` 的 `fitSignal` 注释：父组件 `await` 完刷新行程时
+ * React 还没重渲染，那时调 `fitAll()` 读到的是**上一批**覆盖物 ——
+ * 飞向旧位置，且没有任何报错。计数器走同一次 commit，不会错。
+ *
+ * （`flyTo` 不受这个影响：它只改地图中心的缩放与中心点，不依赖覆盖物列表，
+ *  所以点证据定位时直接调句柄是安全的。）
  */
 
-import { useMemo, useState } from 'react';
-import { CircleDot, Info, Map as MapIcon } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { BadgeCheck, ChevronLeft, Route, ShieldCheck, Sparkles } from 'lucide-react';
 
 import type { TripView } from '../../services/api/trips';
 import type { UnpackedPlace } from '../../types/share';
-import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
 import { Badge } from '../../components/ui/badge';
-import { MapActionPanel } from './MapActionPanel';
-import { MapCanvas } from './MapCanvas';
+import { Button } from '../../components/ui/button';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../../components/ui/sheet';
+import { toast } from '../../components/ui/use-toast';
+import { findPointForEvidence } from '../../lib/mapView';
+import { ChatPanel } from '../AgentPage/ChatPanel';
+import { MapCanvas, type MapHandle } from './MapCanvas';
+import { ShareDialog, type ShareSection } from './ShareDialog';
+import { TripDrawer } from './TripDrawer';
 import {
   DEFAULT_LAYER_VISIBILITY,
   planMapRender,
@@ -41,16 +63,25 @@ export interface MapPageProps {
   sharePlaces?: readonly UnpackedPlace[];
   /** 后端行程列表。每个 item 里带坐标的会进「我的照片」图层。 */
   trips?: readonly TripView[];
-  /** 导入成功后通知上层重新拉行程列表。 */
-  onTripsChanged?: () => void;
+  /** 导入/新建成功后通知上层刷新行程列表。 */
+  onTripsChanged?: () => void | Promise<void>;
+  /** 信物解出的地点 → 上地图画模糊圈（由 App 持有状态）。 */
+  onViewOnMap?: (places: UnpackedPlace[]) => void;
 }
 
 /** 高德 JS API key。前端 key 会被打进产物，靠 referer 白名单保护，不当机密。 */
 const AMAP_JS_KEY = import.meta.env.VITE_AMAP_JS_KEY ?? '';
 const AMAP_SECURITY_CODE = import.meta.env.VITE_AMAP_SECURITY_CODE ?? '';
 
-export function MapPage({ sharePlaces = [], trips = [], onTripsChanged }: MapPageProps) {
+export function MapPage({ sharePlaces = [], trips = [], onTripsChanged, onViewOnMap }: MapPageProps) {
   const [visibility, setVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
+  const [tripDrawerOpen, setTripDrawerOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [shareSection, setShareSection] = useState<ShareSection | null>(null);
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState('');
+  const [fitSignal, setFitSignal] = useState(0);
+  const mapRef = useRef<MapHandle | null>(null);
 
   // 两个数据源拼成一份点列表：图层开关与渲染计划都只认 `MapPointInput`，
   // 所以"合流"发生在这一层，layers.ts 不需要知道行程是什么。
@@ -63,49 +94,182 @@ export function MapPage({ sharePlaces = [], trips = [], onTripsChanged }: MapPag
   const shareCount = useMemo(() => points.filter((p) => p.source === 'share').length, [points]);
   const photoCounts = useMemo(() => countTripPhotos(trips), [trips]);
 
-  return (
-    <div className="flex flex-col gap-4 p-4">
-      <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm transition-shadow duration-200 hover:shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <MapIcon className="h-5 w-5" />
-          </div>
-          <div className="leading-tight">
-            <h1 className="text-lg font-semibold tracking-tight">旅忆地图</h1>
-            <p className="text-xs text-muted-foreground">本地解签 · 坐标不出设备</p>
-          </div>
-          <Badge variant="secure">隐私模糊</Badge>
-        </div>
+  /** 导入/新建完成：先让上层刷新数据，再请求地图飞过去。
+   *  顺序不能反 —— 飞行的依据是新数据算出来的覆盖物。 */
+  const handleTripsChanged = useCallback(async () => {
+    await onTripsChanged?.();
+    setFitSignal((n) => n + 1);
+  }, [onTripsChanged]);
 
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <CircleDot className="h-4 w-4" />
+  /** 点 AI 回答里的引用 `[n]` → 飞到对应证据并高亮。 */
+  const handleLocate = useCallback(
+    (ref: string) => {
+      const point = findPointForEvidence(points, ref);
+      // 证据里没有坐标通路（见 lib/mapView.ts 的说明），必须说清楚
+      // 而不是默默什么都不做 —— 后者会被当成"按钮坏了"。
+      if (!point || typeof point.lat !== 'number' || typeof point.lng !== 'number') {
+        toast({
+          variant: 'destructive',
+          title: '无法定位到地图',
+          description: '这条引用没有对应的坐标信息，只能查看文字内容。',
+        });
+        return;
+      }
+      setSelectedTripId(null);
+      setHighlightId(point.id);
+      setChatOpen(false);
+      // flyTo 只改地图中心与缩放，不依赖覆盖物列表，所以直接调句柄是安全的
+      mapRef.current?.flyTo(point.lng, point.lat);
+    },
+    [points],
+  );
+
+  /** 打开信物对话框，并关掉另外两个浮层（三者互斥）。 */
+  const openShare = useCallback((section: ShareSection) => {
+    setTripDrawerOpen(false);
+    setChatOpen(false);
+    setShareSection(section);
+  }, []);
+
+  return (
+    <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
+      {/* 唯一底层：全屏地图 */}
+      <div className="absolute inset-0">
+        <MapCanvas
+          ref={mapRef}
+          points={points}
+          jsKey={AMAP_JS_KEY}
+          securityCode={AMAP_SECURITY_CODE}
+          highlightId={highlightId}
+          fitSignal={fitSignal}
+        />
+      </div>
+
+      {/* 左上角品牌条。pointer-events-none 让这块不挡住地图拖动，
+          Badge 自己再打开事件（它不需要响应拖拽）。 */}
+      <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2 rounded-xl border bg-background/85 px-3 py-2 shadow-sm backdrop-blur">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Route className="h-4 w-4" />
+        </span>
+        <div className="leading-tight">
+          <div className="text-sm font-semibold tracking-tight">旅忆地图</div>
+          <div className="text-[11px] text-muted-foreground">本地解签 · 坐标不出设备</div>
+        </div>
+        <Badge variant="secure" className="pointer-events-auto">
+          <ShieldCheck className="h-3 w-3" />
+          隐私模糊
+        </Badge>
+      </div>
+
+      {/* 左下角工具栏：信物分享的两个入口 */}
+      <div className="absolute bottom-6 left-4 z-10 flex flex-col gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="justify-start border-primary/30 bg-background/90 shadow-md backdrop-blur hover:bg-background"
+          onClick={() => openShare('generate')}
+        >
+          <BadgeCheck className="h-4 w-4 text-primary" />
+          生成信物
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="justify-start bg-background/90 shadow-md backdrop-blur hover:bg-background"
+          onClick={() => openShare('verify')}
+        >
+          <ShieldCheck className="h-4 w-4" />
+          验证信物
+        </Button>
+        <p className="max-w-[200px] pl-1 text-[11px] leading-relaxed text-muted-foreground">
+          模糊圈半径是<strong>承诺半径</strong>，不是本次实际偏移量 —— 真实位置只在圈内某处。
+        </p>
+      </div>
+
+      {/* 右缘半圆形 Tab：抽屉触发器。文字竖排，收起时只占 ~28px。 */}
+      <button
+        type="button"
+        onClick={() => {
+          setChatOpen(false);
+          setTripDrawerOpen(true);
+        }}
+        aria-label="打开行程与相册抽屉"
+        className="absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1 rounded-l-full border border-r-0 bg-background/90 py-5 pl-2 pr-1.5 shadow-lg backdrop-blur transition-all duration-200 hover:bg-background hover:pr-2.5"
+      >
+        <ChevronLeft className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="text-xs font-medium [writing-mode:vertical-rl]">行程与相册</span>
+      </button>
+
+      {/* 右下角 AI FAB */}
+      <button
+        type="button"
+        onClick={() => {
+          setTripDrawerOpen(false);
+          setChatOpen(true);
+        }}
+        aria-label="打开旅忆助手"
+        className="absolute bottom-6 right-4 z-10 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-all duration-200 hover:scale-105 hover:shadow-2xl active:scale-95"
+      >
+        <Sparkles className="h-6 w-6" />
+      </button>
+
+      {/* 行程与相册抽屉 */}
+      <Sheet open={tripDrawerOpen} onOpenChange={setTripDrawerOpen}>
+        <SheetContent side="right" className="flex w-[92vw] flex-col gap-0 p-0 sm:max-w-[400px]">
+          <SheetHeader className="sr-only">
+            <SheetTitle>行程与相册</SheetTitle>
+            <SheetDescription>行程列表、照片导入与图层开关</SheetDescription>
+          </SheetHeader>
+          <TripDrawer
+            trips={trips}
+            visibility={visibility}
+            onToggleLayer={(layer) => setVisibility((v) => toggleLayer(v, layer))}
+            shareCount={shareCount}
+            onTripsChanged={handleTripsChanged}
+            selectedTripId={selectedTripId}
+            onSelectTrip={setSelectedTripId}
+          />
+        </SheetContent>
+      </Sheet>
+
+      {/* AI 助手抽屉。与行程抽屉互斥：见文件头说明。 */}
+      <Sheet open={chatOpen} onOpenChange={setChatOpen}>
+        <SheetContent side="right" className="flex w-[92vw] flex-col gap-0 p-0 sm:max-w-[440px]">
+          <SheetHeader className="sr-only">
+            <SheetTitle>旅忆助手</SheetTitle>
+            <SheetDescription>关于你旅行记忆的问答，回答带引用</SheetDescription>
+          </SheetHeader>
+          <ChatPanel onLocate={handleLocate} />
+        </SheetContent>
+      </Sheet>
+
+      {/* 信物分享对话框 */}
+      <ShareDialog
+        open={shareSection !== null}
+        onOpenChange={(open) => {
+          if (!open) setShareSection(null);
+        }}
+        trips={trips}
+        section={shareSection ?? undefined}
+        onViewOnMap={(places) => {
+          setShareSection(null);
+          onViewOnMap?.(places);
+        }}
+      />
+
+      {/* 底部常驻计数：让用户随时知道地图上有多少点。
+          放在底部中间而不是角落，是为了不和左右两个浮层抢位置。 */}
+      <div className="pointer-events-none absolute bottom-6 left-1/2 z-0 -translate-x-1/2">
+        <div className="flex items-center gap-2 rounded-full border bg-background/85 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
+          <Route className="h-3 w-3" />
           <span>
             可见 <span className="font-semibold text-foreground">{plan.items.length}</span> 个点
           </span>
+          <span className="text-border">|</span>
+          <span>照片 {photoCounts.onMap}</span>
           {plan.hidden > 0 && <Badge variant="muted">已隐藏 {plan.hidden}</Badge>}
         </div>
-      </header>
-
-      {/* relative + flex-col：MapCanvas 内部的 .map-canvas-wrap 靠 flex:1 撑满这个定高容器 */}
-      <div className="relative flex h-[70vh] min-h-[420px] flex-col overflow-hidden rounded-xl border shadow-md">
-        <MapActionPanel
-          visibility={visibility}
-          onToggleLayer={(layer) => setVisibility((v) => toggleLayer(v, layer))}
-          shareCount={shareCount}
-          photoCount={photoCounts.onMap}
-          photoTotal={photoCounts.total}
-          onTripsChanged={onTripsChanged}
-        />
-        <MapCanvas points={points} jsKey={AMAP_JS_KEY} securityCode={AMAP_SECURITY_CODE} />
       </div>
-
-      <Alert variant="info" className="shadow-sm transition-shadow duration-200 hover:shadow-md">
-        <Info className="h-4 w-4" />
-        <AlertTitle>模糊圈半径的含义</AlertTitle>
-        <AlertDescription>
-          模糊圈的半径是<strong>承诺半径</strong>，不是本次实际偏移量 —— 真实位置只在圈内某处。
-        </AlertDescription>
-      </Alert>
     </div>
   );
 }

@@ -340,33 +340,37 @@ export function SharePage({ onViewOnMap, trips = [] }: SharePageProps) {
         onChanged={refreshFriends}
       />
 
-      <RecipientCard
-        tripLabel={usingDemo ? '内置示例旅程' : '我导入的照片'}
-        sourceNote={
-          usingDemo
-            ? '用内置的洛阳两日示例打包：地点坐标会先做地理模糊，只有被勾选的收件人能解开。'
-            : `打包后端行程「${normalizedTrip.title}」：照片字节取本机缩略图缓存，坐标先做地理模糊。`
-        }
-        tripSource={
-          <TripSourceSelect
-            trips={trips}
-            value={effectiveTripId}
-            onChange={setSelectedTripId}
-          />
-        }
-        selfSelected={selfSelected}
-        onToggleSelf={setSelfSelected}
-        selfLabel={`指纹 ${identity.pubHex.slice(0, 8)}`}
-        friends={friends}
-        selectedFriendIds={selectedFriendIds}
-        onToggleFriend={toggleFriend}
-        recipientCount={recipientPubkeys.length}
-        generating={generating}
-        onGenerate={() => void generate()}
-        warnings={warnings}
-        semanticTags={semanticTags}
-        missingTagNotice={missingTagNotice}
-      />
+      {/* id 是给外层 ShareDialog 的锚点滚动用的（「生成信物」按钮直接跳到这）。
+          scroll-mt-4：滚动容器有内边距，不补这一截标题会被切掉一截。 */}
+      <div id="share-generate" className="scroll-mt-4">
+        <RecipientCard
+          tripLabel={usingDemo ? '内置示例旅程' : '我导入的照片'}
+          sourceNote={
+            usingDemo
+              ? '用内置的洛阳两日示例打包：地点坐标会先做地理模糊，只有被勾选的收件人能解开。'
+              : `打包后端行程「${normalizedTrip.title}」：照片字节取本机缩略图缓存，坐标先做地理模糊。`
+          }
+          tripSource={
+            <TripSourceSelect
+              trips={trips}
+              value={effectiveTripId}
+              onChange={setSelectedTripId}
+            />
+          }
+          selfSelected={selfSelected}
+          onToggleSelf={setSelfSelected}
+          selfLabel={`指纹 ${identity.pubHex.slice(0, 8)}`}
+          friends={friends}
+          selectedFriendIds={selectedFriendIds}
+          onToggleFriend={toggleFriend}
+          recipientCount={recipientPubkeys.length}
+          generating={generating}
+          onGenerate={() => void generate()}
+          warnings={warnings}
+          semanticTags={semanticTags}
+          missingTagNotice={missingTagNotice}
+        />
+      </div>
 
       <ImportCard
         importing={importing}
@@ -377,10 +381,12 @@ export function SharePage({ onViewOnMap, trips = [] }: SharePageProps) {
       />
 
       {/* W7-3：可验证断言。与导入区共用同一份解包结论，所以两者不会给出矛盾的判断。 */}
-      <VerifyCard
-        cred={{ privHex: identity.privHex }}
-        externalResult={view}
-      />
+      <div id="share-verify" className="scroll-mt-4">
+        <VerifyCard
+          cred={{ privHex: identity.privHex }}
+          externalResult={view}
+        />
+      </div>
     </div>
   );
 }

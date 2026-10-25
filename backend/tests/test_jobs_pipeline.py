@@ -74,7 +74,7 @@ async def test_caption_job_writes_back_and_is_idempotent(photos):
     user_id, photo_ids = photos
 
     async with SessionFactory() as session:
-        job = CaptionJob(session, vision=MockVision(get_settings()))
+        job = CaptionJob(session, vision=MockVision(get_settings()), user_id=user_id)
         report = await job.run(limit=10)
         await session.commit()
 
@@ -91,6 +91,7 @@ async def test_caption_job_writes_back_and_is_idempotent(photos):
         again = CaptionJob(
             session,
             vision=MockVision(get_settings()),
+            user_id=user_id,
         )
         report2 = await again.run(limit=10)
         await session.commit()
@@ -105,6 +106,7 @@ async def test_index_job_builds_day_documents(photos):
         await CaptionJob(
             session,
             vision=MockVision(get_settings()),
+            user_id=user_id,
         ).run(limit=10)
         await session.commit()
 
@@ -141,6 +143,7 @@ async def test_reindex_force_rebuilds(photos):
         await CaptionJob(
             session,
             vision=MockVision(get_settings()),
+            user_id=user_id,
         ).run(limit=10)
         await session.commit()
 

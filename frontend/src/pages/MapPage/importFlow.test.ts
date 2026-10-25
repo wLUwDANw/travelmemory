@@ -63,6 +63,18 @@ function renderPage(props: MapPageProps = {}): void {
   render(React.createElement(React.Fragment, null, React.createElement(MapPage, props), React.createElement(Toaster)));
 }
 
+/** 打开「行程与相册」抽屉。
+ *
+ *  为什么必须先打开：文件输入框、图层开关、行程列表全在抽屉里，
+ *  而 Radix 的 Sheet **关闭时不挂载内容**（那是 Modal 的语义，
+ *  不该被 forceMount 破坏）。所以测试要先点右缘那个半圆 Tab。
+ */
+async function openDrawer(): Promise<void> {
+  fireEvent.click(screen.getByLabelText('打开行程与相册抽屉'));
+  // 等抽屉内容真的挂上：Sheet 有进场动画，首帧可能还没进 DOM
+  await waitFor(() => expect(document.querySelector('input[type="file"]')).toBeTruthy());
+}
+
 afterEach(() => {
   cleanup();
   resetNativeBridge();
@@ -71,7 +83,7 @@ afterEach(() => {
 });
 
 describe('MapPage 导入闭环', () => {
-  it('行程里的照片进「我的照片」图层，Badge 显示真实张数', () => {
+  it('行程里的照片进「我的照片」图层，Badge 显示真实张数', async () => {
     const trips: TripView[] = [
       {
         id: 't1', title: '洛阳两日', startedAt: '2026-10-01T00:00:00Z', endedAt: null,
@@ -84,13 +96,15 @@ describe('MapPage 导入闭环', () => {
       },
     ];
     renderPage({ trips });
+    await openDrawer();
 
     expect(screen.getByText('我的照片').closest('div')?.parentElement?.textContent).toContain('2');
     expect(screen.getByText('共 3 张，2 张有坐标')).toBeTruthy();
   });
 
-  it('没有照片时 Badge 显示「暂无」', () => {
+  it('没有照片时 Badge 显示「暂无」', async () => {
     renderPage();
+    await openDrawer();
     expect(screen.getByText('暂无')).toBeTruthy();
   });
 
@@ -107,6 +121,7 @@ describe('MapPage 导入闭环', () => {
     let refreshed = 0;
 
     renderPage({ onTripsChanged: () => { refreshed += 1; } });
+    await openDrawer();
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     expect(input).toBeTruthy();
@@ -137,6 +152,7 @@ describe('MapPage 导入闭环', () => {
     );
 
     renderPage();
+    await openDrawer();
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
 
     fireEvent.change(input, { target: { files: [new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' })] } });
@@ -160,6 +176,7 @@ describe('MapPage 导入闭环', () => {
     vi.stubGlobal('fetch', (async () => { fetched += 1; return new Response('{}', { status: 200 }); }) as unknown as typeof fetch);
 
     renderPage();
+    await openDrawer();
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([new Uint8Array([1])], 'a.pdf', { type: 'application/pdf' })] } });
 

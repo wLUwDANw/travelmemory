@@ -34,6 +34,27 @@
 | 4 Memory + LangGraph | ✅ | **0006**（`memory_item` / `memory_source`） |
 | 5 评估与可观测 | ✅ 已封板 | 0007（`faithfulness`） |
 | 6 地图相册 + 跨端 + 隐私分享 | ✅ 已交付（真机验证待人工） | — |
+| 7 语义抽象 + 群体推荐 + 可验证断言 | ✅ 已收口（提交 `b970dad`） | — |
+
+## 阶段 7 要点（W7-1 ~ W7-3）
+
+- 文档：`docs/stages/stage7-research.md`。**不宣称联邦学习** —— 隐私收益来自
+  语义抽象 + 序列截断 + k-匿名门禁三重叠加，不是参与方数量
+- W7-1：`app/utils/semantic_tags.py` 是六类词表**唯一真相源**（前后端共用，顺序即契约）。
+  词表两类词：**单字负责泛化、整名负责纠偏**，靠 `_break_tie()` 的平票修正
+  （命中词更长者胜出）生效 —— 所以整名必须比它要压过的单字更长
+- W7-1：两个"序列"不同 —— `semantic_sequence_for_trip()` **不合并**相邻重复（展示用），
+  `extract_sequences()` **必须合并**（挖掘用 `support`）。拿错方向模式库会碎
+- W7-2：`POST /api/v1/recommend/semantic`，`K_ANONYMITY=5`。门禁**逐模式**判定，
+  不是全局样本量。`support` 绝不出网（`SemanticRecommendation` 结构上就不带它）
+- W7-2 接口语义：未达标 → **200 + `tag=None`**；开关关 → **404**；
+  非法标签静默丢弃，全丢光 → **422**
+- W7-3：颜色是密码学语义 —— 绿=证实 / 红=证伪 / 灰=未证实。
+  **链未锚定是灰色不是红色**（没拿到证伪证据就不能涂红）
+- 改词表必须同步升 `SEMANTIC_TAG_VERSION`，并同步 `core/config.py::semantic_tag_version`
+  与 `app/data/semantic_tags.yaml`（当前 `sem-2026.2`）
+- `POST /api/v1/trips` 建的是 `source=manual` 的空行程；**重建只删 cluster 的行**，
+  用户输入不能被派生数据的重建冲掉
 
 ## 阶段 6 要点（W6-1 ~ W6-5）
 
@@ -62,6 +83,13 @@
 
 ## 已知坑
 
+- **pytest exit code 会被安全钩子置 1**（末尾 `[safe-delete]...` 那行不是失败）。
+  判定是否通过**只认 `--junit-xml` 里的 `failures="0"`**
+- 前端测试（`src/**/*.test.ts`）：
+  - `fireEvent.change(input, { target: { files } })` **静默失效**（`input.files` 只读无 setter），
+    必须 `Object.defineProperty(input, 'files', { value: [file], configurable: true })`
+  - **jsdom 的 `File` 没有 `.text()`**（浏览器有），不补就只能测到"读不出"这条路径
+  - `waitFor` 要等**结果出现**，不要等"loading 消失"——后者在异步开始前就已成立
 - 先 `import app.services` 曾触发循环导入，已用 PEP 562 惰性导出修掉；
   新增 `app/services/*` 时留意不要再引回 `app.agent.rag` 的 eager import
 - `SELF_CHECK_FAILED_ANSWER` 含非软句 → `citation_rate()` 判 0.0（self_check 不受影响），

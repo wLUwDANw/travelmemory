@@ -7,7 +7,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { importPhotos, setPhotosApi } from './photos';
-import { listTrips, setTripsApi } from './trips';
+import { listTrips, renameTrip, setTripsApi } from './trips';
 
 const BASE = 'http://api.test';
 
@@ -136,32 +136,32 @@ describe('importPhotos', () => {
   });
 });
 
-describe('listTrips', () => {
-  /** 同样是后端真实返回的 snake_case 形状。 */
-  const TRIPS = {
-    trips: [
-      {
-        id: 't1',
-        title: '上海三日',
-        started_at: '2026-04-03T10:20:00Z',
-        ended_at: '2026-04-05T18:00:00Z',
-        source: 'cluster',
-        item_count: 2,
-        items: [
-          {
-            id: 'i1',
-            photo_id: 'p1',
-            taken_at: '2026-04-03T10:20:00Z',
-        lat: 31.2304,
-            lng: 121.4737,
-            semantic_tag: 'metropolis',
-            semantic_label: '都市风光',
-          },
-        ],
-      },
-    ],
-  };
+/** 后端 `GET /api/v1/trips` 真实返回的 snake_case 形状（客户端会折成 camelCase）。 */
+const TRIPS = {
+  trips: [
+    {
+      id: 't1',
+      title: '上海三日',
+      started_at: '2026-04-03T10:20:00Z',
+      ended_at: '2026-04-05T18:00:00Z',
+      source: 'cluster',
+      item_count: 2,
+      items: [
+        {
+          id: 'i1',
+          photo_id: 'p1',
+          taken_at: '2026-04-03T10:20:00Z',
+          lat: 31.2304,
+          lng: 121.4737,
+          semantic_tag: 'metropolis',
+          semantic_label: '都市风光',
+        },
+      ],
+    },
+  ],
+};
 
+describe('listTrips', () => {
   it('正常响应解析成 TripView[]', async () => {
     const fetchImpl = vi.fn(
       async (_url: RequestInfo | URL, _init?: RequestInit) => jsonResponse(TRIPS),
@@ -198,5 +198,51 @@ describe('listTrips', () => {
     setTripsApi({ baseUrl: BASE });
 
     await expect(listTrips()).rejects.toThrow(/获取行程列表失败：网络请求异常（ECONNREFUSED）/);
+  });
+});
+
+describe('renameTrip', () => {
+  it('打的是 PATCH /api/v1/trips/{id}，body 带 title', async () => {
+    const fetchImpl = vi.fn(
+      async (_url: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ trip: TRIPS.trips[0] }),
+    );
+    await renameTrip('t1', '洛阳两日', { baseUrl: BASE, fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://api.test/api/v1/trips/t1');
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ title: '洛阳两日' });
+  });
+
+  it('正常响应解析成 TripView', async () => {
+    vi.stubGlobal(
+      'fetch',
+      async () => jsonResponse({ trip: { ...TRIPS.trips[0], title: '改过的名字', source: 'manual' } }),
+    );
+    const trip = await renameTrip('t1', '改过的名字', { baseUrl: BASE });
+    expect(trip.title).toBe('改过的名字');
+    // 后端会把 source 提升成 manual（改名的行程退出自动重建），前端必须照显示
+    expect(trip.source).toBe('manual');
+  });
+
+  it('404 时错误信息说人话（行程不存在 / 开关没开）', async () => {
+    vi.stubGlobal('fetch', async () => new Response('不存在', { status: 404 }));
+    await expect(renameTrip('t1', 'x', { baseUrl: BASE })).rejects.toThrow(
+      /重命名失败：该行程不存在/,
+    );
+  });
+
+  it('非 2xx 抛错并带上响应体', async () => {
+    vi.stubGlobal('fetch', async () => textResponse('标题太长', 422));
+    await expect(renameTrip('t1', 'x', { baseUrl: BASE })).rejects.toThrow(/HTTP 422/);
+  });
+
+  it('id 里的特殊字符被编码，不会把 URL 拼坏', async () => {
+    const fetchImpl = vi.fn(
+      async (_url: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ trip: TRIPS.trips[0] }),
+    );
+    await renameTrip('a/b c', 'x', { baseUrl: BASE, fetchImpl });
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://api.test/api/v1/trips/a%2Fb%20c');
   });
 });

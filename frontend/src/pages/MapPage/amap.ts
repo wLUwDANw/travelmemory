@@ -28,6 +28,9 @@ export interface AmapMap {
   setCenter(center: [number, number]): void;
   setZoom(zoom: number): void;
   getZoom(): number;
+  /** 同时设缩放与中心。**一步做完**而不是先 setZoom 再 setCenter：
+   *  高德内部会为两次调用各排一次重绘，动画中间态会被用户看到"先缩后跳"。 */
+  setZoomAndCenter(zoom: number, center: [number, number]): void;
   setFitView(overlays: AmapOverlay[], immediately?: boolean, avoid?: [number, number, number, number]): void;
   add(overlay: AmapOverlay | AmapOverlay[]): void;
   remove(overlay: AmapOverlay | AmapOverlay[]): void;

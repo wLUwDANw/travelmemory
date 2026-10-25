@@ -30,15 +30,20 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, HTTPException
+from sqlalchemy import func, select
 
 from app.core.feature_flags import is_enabled
 from app.db.session import SessionFactory
+from app.models.trip import TripItem
 from app.schemas.trip import (
     TripCreateRequest,
     TripCreateResponse,
     TripItemView,
     TripListResponse,
+    TripRenameRequest,
     TripView,
     iso_or_none,
 )
@@ -47,6 +52,7 @@ from app.services.trip_service import (
     TripSnapshot,
     create_manual_trip,
     list_user_trips,
+    rename_user_trip,
     semantic_tag_for_photo,
 )
 from app.services.user_service import get_or_create_demo_user
@@ -154,6 +160,57 @@ async def create_trip(req: TripCreateRequest) -> TripCreateResponse:
             ended_at=iso_or_none(trip.ended_at),
             source=trip.source,
             item_count=0,
+            items=[],
+        )
+    )
+
+
+@router.patch(
+    "/{trip_id}",
+    summary="重命名一趟行程",
+    response_model=TripCreateResponse,
+)
+async def rename_trip(trip_id: uuid.UUID, req: TripRenameRequest) -> TripCreateResponse:
+    """改一趟行程的标题。
+
+    ## 为什么 404 而不是 403
+
+    找不到的行程与"不属于你"的行程对调用方是**同一件事**：都不该让你改。
+    用 403 会告诉外部"这个 id 确实存在，只是不属于你"—— 那是免费的枚举接口。
+
+    ## 为什么改名后 source 会变成 manual
+
+    见 `services/trip_service.py::rename_trip` 的取舍说明：不改 source 的话，
+    下次导入照片触发的重建会把用户敲的标题冲掉。
+    """
+    if not is_enabled("photo_import"):
+        raise HTTPException(status_code=404, detail="该能力未启用")
+
+    title = req.title.strip()
+    if not title:
+        # 同 create_trip：pydantic 的 min_length 挡不住 "   "
+        raise HTTPException(status_code=422, detail="行程标题不能为空")
+
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        trip = await rename_user_trip(session, user_id=user.id, trip_id=trip_id, title=title)
+        if trip is None:
+            raise HTTPException(status_code=404, detail="行程不存在")
+        # 单独数一次，而不是回显 0：`item_count` 是给前端直接渲染的字段，
+        # 给个假 0 会让列表里的行程卡片在改名后突然显示"0 个地点"。
+        item_count = await session.scalar(
+            select(func.count()).select_from(TripItem).where(TripItem.trip_id == trip.id)
+        )
+        await session.commit()
+
+    return TripCreateResponse(
+        trip=TripView(
+            id=str(trip.id),
+            title=trip.title,
+            started_at=iso_or_none(trip.started_at),
+            ended_at=iso_or_none(trip.ended_at),
+            source=trip.source,
+            item_count=int(item_count or 0),
             items=[],
         )
     )
