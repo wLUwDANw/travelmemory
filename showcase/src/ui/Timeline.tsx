@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -35,6 +36,8 @@ export const Timeline = forwardRef<TimelineHandle, TimelineProps>(function Timel
     width: 0,
     gradient: null,
   });
+  /** 时间轴的 CSS 宽度与 dpr，只在尺寸真的变化时量一次。 */
+  const sizeRef = useRef({ width: 0, dpr: 1 });
   const dragRef = useRef<{ dragging: boolean; wasPlaying: boolean }>({
     dragging: false,
     wasPlaying: false,
@@ -43,21 +46,59 @@ export const Timeline = forwardRef<TimelineHandle, TimelineProps>(function Timel
   /** 每张照片在轨迹上的弧长位置（一次算好，用于竖刻度） */
   const photoS = useMemo(() => photoArcPositions(journey), [journey]);
 
+  /**
+   * 尺寸只在挂载 / resize 时量。
+   *
+   * 为什么不能放在 `draw()` 里：`draw` 每帧被主循环调用，而它前面刚写完 32 张卡片的
+   * `style.transform/opacity` 和 HUD 文本。此时读 `getBoundingClientRect()` 会逼浏览器
+   * **立刻同步重排**一次（layout thrashing）。CPU profile 实测这一项后段高达 328ms / 10s，
+   * 白白吃掉帧预算，让瓦片加载的尖峰更容易把帧顶过 16.7ms。
+   * 用 ResizeObserver 缓存宽度后，draw 每帧只读写缓存的数字。
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const applySize = (cssWidth: number): void => {
+      const width = Math.max(1, Math.round(cssWidth));
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const size = sizeRef.current;
+      if (width === size.width && dpr === size.dpr) return;
+      size.width = width;
+      size.dpr = dpr;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(CANVAS_HEIGHT * dpr);
+      cacheRef.current.gradient = null;
+    };
+
+    const onWindowResize = (): void => applySize(canvas.getBoundingClientRect().width);
+    // jsdom / 老浏览器没有 ResizeObserver：退化成挂载时量一次 + window.resize 兜底
+    if (typeof ResizeObserver === 'undefined') {
+      onWindowResize();
+      window.addEventListener('resize', onWindowResize);
+      return () => window.removeEventListener('resize', onWindowResize);
+    }
+    const observer = new ResizeObserver((entries) => {
+      applySize(entries[0]?.contentRect.width ?? 0);
+    });
+    observer.observe(canvas);
+    window.addEventListener('resize', onWindowResize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', onWindowResize);
+    };
+  }, []);
+
   const draw = useCallback(
     (q: number) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
+      const { width, dpr } = sizeRef.current;
+      // ResizeObserver 首帧回调还没到，跳过这一帧即可（时间轴少画 1 帧无感）
+      if (width <= 0) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const rect = canvas.getBoundingClientRect();
-      const width = Math.max(1, Math.round(rect.width));
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(CANVAS_HEIGHT * dpr)) {
-        canvas.width = Math.round(width * dpr);
-        canvas.height = Math.round(CANVAS_HEIGHT * dpr);
-        cacheRef.current.gradient = null;
-      }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, CANVAS_HEIGHT);
 

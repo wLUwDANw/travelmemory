@@ -85,11 +85,13 @@ const progress = `(() => {
   const sl = document.querySelector('[role=slider]');
   const txt = document.body.innerText.match(/(\\d{1,3})%/);
   const tiles = document.querySelectorAll('.amap-container img, .amap-layers img').length;
-  return JSON.stringify({ pct: sl ? sl.getAttribute('aria-valuenow') : (txt ? txt[1] : '?'), tiles });
+  const tl = document.querySelector('.tl-track canvas');
+  return JSON.stringify({ pct: sl ? sl.getAttribute('aria-valuenow') : (txt ? txt[1] : '?'), tiles,
+    tl: tl ? [tl.width, tl.height] : null });
 })()`;
 
 console.log(`窗口 ${WINDOW}s × ${ROUNDS}，展示站青甘大环线，1440×900 DPR1`);
-console.log(' #   时间    fps    p50   p90   p99   long%   进度%   瓦片img');
+console.log(' #   时间    fps    p50   p90   p99   long%   进度%   时间轴canvas');
 for (let i = 0; i < ROUNDS; i++) {
   await sleep(WINDOW * 1000);
   const stat = JSON.parse(await ev(`(() => { const raw=window.__f; const t1=performance.now(); const start=t1-${WINDOW * 1000}-60;
@@ -97,7 +99,7 @@ for (let i = 0; i < ROUNDS; i++) {
     const q=p=>f[Math.min(n-1,Math.floor(n*p))]??0; const m=f.reduce((a,b)=>a+b,0)/n;
     return JSON.stringify({ fps:+(1000/m).toFixed(1), p50:+q(.5).toFixed(1), p90:+q(.9).toFixed(1), p99:+q(.99).toFixed(1), long:+(f.filter(x=>x>24).length/n*100).toFixed(1), n }); })()`));
   const p = JSON.parse(await ev(progress));
-  console.log(`${String(i + 1).padStart(2)}  ${String((i + 1) * WINDOW).padStart(4)}s  ${String(stat.fps).padStart(5)}  ${String(stat.p50).padStart(5)}  ${String(stat.p90).padStart(5)}  ${String(stat.p99).padStart(5)}  ${String(stat.long).padStart(5)}   ${String(p.pct).padStart(5)}   ${String(p.tiles).padStart(5)}`);
+  console.log(`${String(i + 1).padStart(2)}  ${String((i + 1) * WINDOW).padStart(4)}s  ${String(stat.fps).padStart(5)}  ${String(stat.p50).padStart(5)}  ${String(stat.p90).padStart(5)}  ${String(stat.p99).padStart(5)}  ${String(stat.long).padStart(5)}   ${String(p.pct).padStart(5)}   ${p.tl ? p.tl.join('x') : 'null'}`);
 }
 await ev('window.__s=false');
 ws.close(); cleanup();

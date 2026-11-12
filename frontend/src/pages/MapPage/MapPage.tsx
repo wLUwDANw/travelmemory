@@ -147,8 +147,8 @@ export function MapPage({
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
       {/* 唯一底层：全屏地图。
-          回放打开时**卸载**它，而不是隐藏：两张高德实例同时在跑时回放只有 43.8fps，
-          单地图的展示站同机 59fps；验证者也测过 `visibility:hidden` 无效（反而 37.2）。
+          回放打开时**卸载**它，而不是隐藏：高德实例只要还活着就会持续更新图层、
+          占主线程，`visibility:hidden` 只是不显示、并不会停掉这些工作（实测隐藏更慢）。
           代价：关闭回放后主地图会重新初始化，视野回到默认中心。 */}
       <div className="absolute inset-0">
         {replayTrip === null ? (

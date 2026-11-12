@@ -285,7 +285,8 @@ backend/app/
   models/ 表结构      core/ 配置 / LLM / Redis 缓存 / feature flags
 research/   实验脚本与结果（不参与部署）
 deploy/     Nginx 与生产 Compose
-tools/      仓库根验收工具（帧率时间线等，不参与构建与部署；别和 backend/app/tools 混了）
+tools/      真机验收工具：帧率曲线 / 主应用回放复验 / CPU profile
+            （都自包含，会自己拉起预览 + 无头浏览器；不参与构建与部署，别和 backend/app/tools 混了）
 docs/
   stages/   阶段复盘与原理讲解（stage0~9）
   images/   验收截图
