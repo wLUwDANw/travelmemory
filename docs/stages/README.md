@@ -15,6 +15,7 @@
 | `stage5-eval-observability.md` | 阶段 5：评估与可观测增强（W5-1 ~ W5-3） | ✅ 第一段已完成并经 5.2/5.3 真实 API 修正（W5-1 评测扩充 + W5-2 归因对比：评测集 29 条含 2 plan；拒答口径收口；`--compare` 环比表；self_check 对 plan/recommend 豁免逐句引用（`utils/intent.py` 规则分类，与评测集标注一致性有测试钉死）；prompt 禁注脚/禁"有证据却说无法回答"，`PROMPT_VERSION=pv2026.10-stage5.3`；W5-3 可观测看板待下一段） |
 | `stage6-map-album.md` | 阶段 6：地图相册 + 跨端 + 隐私分享（W6-1 ~ W6-5） | ✅ 已全量交付（后端 pytest 447 passed / 11 skipped；前端 vitest 141 passed；W6-4 = 后端拉普拉斯地理模糊 + 前端 TrailShare 定向加密信物移植；真机双窗口与高德渲染待人工验证） |
 | `stage7-research.md` | 阶段 7：扩展方向（可选，独立分支） | 待开始 |
+| [stage9-trail-replay.md](./stage9-trail-replay.md) | **阶段 9：轨迹回放**（阶段 6 的延伸能力，非原定路线图阶段；编号 8 属于「多 Agent 引用审计」提案） | ✅ 已交付（前端 423 条测试全绿；展示站 10 秒采样 ≈60fps；光点滞后 45~52px；瓦片 0 abort）。**地图加载器仍是两份，合并前需先补测试** |
 
 文件名规则：`stage<编号>-<主题>.md`，编号与设计文档第十一章保持一致。
 

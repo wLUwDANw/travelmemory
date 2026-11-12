@@ -33,14 +33,24 @@ migrate:
 dev:
 	cd backend && uvicorn app.main:app --reload
 
-web-install:                  # 阶段 2：前端依赖（只需跑一次）
-	cd frontend && npm install
+web-install:                  # 依赖安装（在仓库根跑一次，覆盖 frontend / showcase / packages）
+	npm install
 
-web-dev:                      # 阶段 2：前端开发服务器（5173，/api 代理到 8000）
+web-dev:                      # 主应用开发服务器（5173，/api 代理到 8000）
 	cd frontend && npm run dev
 
-web-typecheck:                # 阶段 2：前端类型检查 + 生产构建
+web-typecheck:                # 主应用类型检查 + 生产构建
 	cd frontend && npm run build
+
+showcase-dev:                 # 轨迹回放展示站（独立运行，不需要后端）
+	cd showcase && npm run dev
+
+showcase-build:               # 展示站生产构建
+	cd showcase && npm run build
+
+js-check:                     # 三个 JS 工作区的类型检查 + 测试（提交前跑这个）
+	npm run typecheck
+	npm run test
 
 cli:
 	cd backend && python -m app.cli

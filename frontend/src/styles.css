@@ -480,3 +480,214 @@ body {
 .place-geo {
   color: hsl(var(--accent));
 }
+
+/* ── 轨迹回放（全屏层）─────────────────────────────────────────────
+ *
+ * 这一层是**深色**的，而本文件的 `--bg/--text` 是浅色主题变量（阶段 2 遗留），
+ * 所以这里不引用它们，全部写死深色值 —— 否则浅色主题一改，回放里的字会变成深色底深色字。
+ *
+ * `backdrop-filter` 只出现在顶/底栏这种小面积元素上；全屏使用会在每帧重采样整条
+ * 渲染链，直接吃掉 60fps。
+ */
+
+.replay-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #05080f;
+  overflow: hidden;
+}
+
+.replay-map {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* canvas 是替换元素：绝对定位且 width:auto 时按固有尺寸(300×150)解析，
+   `inset:0` 的 right/bottom 会因过约束被忽略 —— 必须显式给 100%。 */
+.replay-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.replay-top {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 28px;
+  background: linear-gradient(180deg, rgba(5, 8, 15, 0.9), rgba(5, 8, 15, 0));
+  pointer-events: none;
+}
+
+.replay-top > * {
+  pointer-events: auto;
+}
+
+.replay-eyebrow {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(125, 211, 252, 0.65);
+}
+
+.replay-title {
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: #e6f1ff;
+}
+
+.replay-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #7c8ea6;
+  font-variant-numeric: tabular-nums;
+}
+
+.replay-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 14, 24, 0.72);
+  backdrop-filter: blur(8px);
+  color: #cbd5e1;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+
+.replay-close:hover {
+  color: #ffffff;
+  border-color: rgba(125, 211, 252, 0.5);
+}
+
+.replay-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 26px 22px 20px;
+  /* 底栏背后是**每帧都在变的画布**：这里一旦用 backdrop-filter，浏览器每帧都要
+     对整条 1440×80 的区域重做一次模糊，实测直接吃掉 15~20fps。纯半透明色是合成层操作，零成本。 */
+  background: rgba(5, 8, 15, 0.88);
+}
+
+.replay-toggle {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  background: rgba(8, 14, 24, 0.8);
+  color: #7dd3fc;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.replay-toggle:hover {
+  background: rgba(34, 211, 238, 0.14);
+  border-color: rgba(34, 211, 238, 0.65);
+}
+
+/* 图标切换走 CSS：主循环里不 setState，只改 data-playing */
+.replay-icon-pause {
+  display: none;
+}
+
+.replay-toggle[data-playing='true'] .replay-icon-play {
+  display: none;
+}
+
+.replay-toggle[data-playing='true'] .replay-icon-pause {
+  display: block;
+}
+
+.replay-track {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  height: 22px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.replay-track:focus-visible {
+  outline: 2px solid rgba(125, 211, 252, 0.6);
+  outline-offset: 4px;
+}
+
+.replay-track-base {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.replay-track-fill {
+  position: absolute;
+  left: 0;
+  width: 0%;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.55), #7dd3fc);
+}
+
+.replay-percent {
+  flex: 0 0 auto;
+  width: 52px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #cbd5e1;
+}
+
+.replay-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: #cbd5e1;
+  font-size: 14px;
+}
+
+.replay-empty-hint {
+  font-size: 12px;
+  color: #7c8ea6;
+}
+
+.replay-empty-close {
+  width: auto;
+  height: 32px;
+  margin-top: 8px;
+  padding: 0 16px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}

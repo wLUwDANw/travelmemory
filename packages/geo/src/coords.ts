@@ -1,19 +1,19 @@
 /** WGS84 ↔ GCJ-02 坐标转换（纯函数，无 IO，可单测）。
  *
- * ## 为什么前端要再实现一遍
+ * ## 这里为什么是「唯一真相」
  *
- * 后端 `app/utils/coords.py` 已经有同一份算法，但**地图渲染发生在浏览器里**：
- * 信物解出来的 `PlaceMeta.lat/lng` 是 WGS84（模糊后的），高德 JS API 只认 GCJ-02。
- * 如果为每个点回后端转一次，地图每渲染一帧都是一堆 HTTP 请求 —— 不可接受。
+ * 这套转换原本在仓库里存在三份：后端 `app/utils/coords.py`（权威）、
+ * 主应用 `MapPage/coords.ts`、演示站 `demo/lib/geo.ts`。前两份是逐行同构移植，
+ * 第三份抄的时候把「境外判定框」抄窄了（73.66\~135.05 / 3.86\~53.55，应为
+ * 72.004\~137.8347 / 0.8293\~55.8271）—— 于是黑龙江东部、漠河一带的照片
+ * 在两个应用里会落到不同位置。
  *
- * 所以这里按**逐行同构**的方式移植后端实现：同样的常数、同样的公式、同样的
- * 境外直通规则。两端的差异只可能是"抄错了"，而抄错会被 `coords.test.ts` 里的
- * 天安门测试向量与往返收敛断言抓住（该向量与后端 `test_tools.py` 是同一个）。
- *
- * ## 红线提醒（PROJECT.md §二、[1]）
- *
- * **存储一律 WGS84，展示一律 GCJ-02。** 本模块是唯一允许做这个转换的地方，
+ * 合并后本模块是前端唯一的转换入口，判定框取标准值（与后端一致）。
  * 业务代码不许自己加偏移常数。
+ *
+ * ## 红线（PROJECT.md §二、[2]）
+ *
+ * **存储一律 WGS84，展示一律 GCJ-02。**
  */
 
 /** 经纬度对。**字段顺序刻意是 (lng, lat)**：与 GeoJSON / 高德 API 一致。 */
@@ -27,8 +27,12 @@ const A = 6378245.0;
 const EE = 0.00669342162296594323;
 const PI = Math.PI;
 
-/** 境外不做偏移（GCJ-02 只在中国境内有偏移）。 */
-function outOfChina(lng: number, lat: number): boolean {
+/** 境外不做偏移（GCJ-02 只在中国境内有偏移）。
+ *
+ *  判定框取业界标准值，与后端 `app/utils/coords.py` 一致。
+ *  **不要收窄它**：收窄会把「境内在框外」的点误判成境外，表现为边远地区坐标不偏移。
+ */
+export function outOfChina(lng: number, lat: number): boolean {
   return !(lng >= 72.004 && lng <= 137.8347 && lat >= 0.8293 && lat <= 55.8271);
 }
 
@@ -66,7 +70,11 @@ export function wgs84ToGcj02(lng: number, lat: number): LngLat {
   return { lng: round6(lng + lngOffset), lat: round6(lat + latOffset) };
 }
 
-/** GCJ-02 → WGS84（地图 API 返回的坐标 → 入库坐标）。迭代逼近，3 次足够。 */
+/** GCJ-02 → WGS84（地图 API 返回的坐标 → 入库坐标）。
+ *
+ *  不动点迭代。实测 3 次已收敛到 1e-9 量级，再被 `round6` 收到 6 位小数，
+ *  最终误差 ≤ 5e-7 度（约 5 厘米），远细于任何展示需求。
+ */
 export function gcj02ToWgs84(lng: number, lat: number, iterations = 3): LngLat {
   if (outOfChina(lng, lat)) {
     return { lng, lat };
@@ -81,7 +89,7 @@ export function gcj02ToWgs84(lng: number, lat: number, iterations = 3): LngLat {
   return { lng: round6(curLng), lat: round6(curLat) };
 }
 
-/** 与后端 `round(x, 6)` 对齐：6 位小数约 0.1 米，远细于任何展示需求。 */
+/** 与后端 `round(x, 6)` 对齐：6 位小数约 0.1 米。 */
 function round6(value: number): number {
   return Math.round(value * 1e6) / 1e6;
 }

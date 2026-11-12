@@ -36,14 +36,14 @@ import {
   MapPin,
   MapPinOff,
   Pencil,
+  Play,
   Plus,
   Route,
   Trash2,
 } from 'lucide-react';
 
 import type { PhotoListItem } from '../../services/api/photos';
-import { importPhotos } from '../../services/api/photos';
-import type { TripView } from '../../services/api/trips';
+import { importPhotos } from '../../services/api/photos';import type { TripView } from '../../services/api/trips';
 import { assignTripPhotos, deleteTrip } from '../../services/api/trips';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -73,6 +73,7 @@ import { CreateTripDialog } from './CreateTripDialog';
 import { PhotoLocationDialog } from './PhotoLocationDialog';
 import { PhotoThumb } from './PhotoThumb';
 import { RenameTripDialog } from './RenameTripDialog';
+import { TRAIL_REPLAY_ENABLED } from './replay/replayFlag';
 import type { LayerVisibility } from './layers';
 
 export type DrawerTab = 'trips' | 'photos';
@@ -92,6 +93,11 @@ export interface TripDrawerProps {
   /** 高德 JS API key（传给补标对话框的内嵌地图）。 */
   jsKey: string;
   securityCode?: string;
+  /**
+   * 回放这条行程。**可选**：不传 = 不显示回放入口，
+   * 这样现有的抽屉测试与其它调用点都不用改。
+   */
+  onReplayTrip?: (trip: TripView) => void;
 }
 
 export function TripDrawer({
@@ -105,6 +111,7 @@ export function TripDrawer({
   onSelectTrip,
   jsKey,
   securityCode = '',
+  onReplayTrip,
 }: TripDrawerProps) {
   const [tab, setTab] = useState<DrawerTab>('trips');
   const [tripDialogOpen, setTripDialogOpen] = useState(false);
@@ -334,6 +341,17 @@ export function TripDrawer({
                             {trip.title}
                           </button>
                           <div className="flex shrink-0 items-center gap-1">
+                            {TRAIL_REPLAY_ENABLED && onReplayTrip ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                aria-label={`回放行程 ${trip.title}`}
+                                onClick={() => onReplayTrip(trip)}
+                              >
+                                <Play className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : null}
                             <Button
                               variant="ghost"
                               size="sm"

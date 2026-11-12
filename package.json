@@ -1,0 +1,19 @@
+{
+  "name": "travelmemory",
+  "private": true,
+  "version": "0.1.0",
+  "description": "旅忆地图 TravelMemory —— 单仓库多应用",
+  "workspaces": [
+    "frontend",
+    "showcase",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}

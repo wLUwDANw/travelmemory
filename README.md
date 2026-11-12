@@ -271,7 +271,12 @@ RETRIEVAL_MIN_SCORE=0.05
 ## 目录速查
 
 ```
-frontend/    React + TS + Capacitor（Web / Android / iOS 同一套代码）
+frontend/   主应用：React + TS + Capacitor（Web / Android / iOS 同一套代码）
+showcase/   轨迹回放展示站：深色 HUD、零后端依赖，可独立运行
+packages/
+  geo/      坐标与地图基础：WGS84↔GCJ-02、Web 墨卡托、球面距离
+            —— 前端**唯一**的坐标转换入口，主应用与展示站共用
+  trail/    轨迹回放内核：样条、里程、路段、相机、Canvas 渲染（纯逻辑，不含 React）
 backend/app/
   api/ 接口层        schemas/ 接口契约      services/ 业务层
   agent/ Agent 运行时（pipeline / graph / rag / memory / eval / prompts）
@@ -280,7 +285,21 @@ backend/app/
   models/ 表结构      core/ 配置 / LLM / Redis 缓存 / feature flags
 research/   实验脚本与结果（不参与部署）
 deploy/     Nginx 与生产 Compose
-docs/archive/ 历史文档
+tools/      仓库根验收工具（帧率时间线等，不参与构建与部署；别和 backend/app/tools 混了）
+docs/
+  stages/   阶段复盘与原理讲解（stage0~9）
+  images/   验收截图
+  design/   设计稿与提案      archive/ 历史文档
 ```
+
+**JS 侧的依赖安装只需在仓库根跑一次**（npm workspaces）：
+
+```bash
+npm install            # 同时装好 frontend / showcase / packages/*
+npm run typecheck      # 四个工作区的类型检查
+npm run test           # 三个工作区的测试（frontend 320 + showcase 86 + geo 17）
+```
+
+后端仍是 Python，走 `make` 与 `requirements.txt`，与 JS 工作区互不影响。
 
 依赖方向严格单向：`agent → nodes → tools → services → models`。

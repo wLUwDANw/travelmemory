@@ -50,6 +50,7 @@ import { ChatPanel } from '../AgentPage/ChatPanel';
 import { MapCanvas, type MapHandle } from './MapCanvas';
 import { ShareDialog, type ShareSection } from './ShareDialog';
 import { TripDrawer } from './TripDrawer';
+import { ReplayStage } from './replay/ReplayStage';
 import {
   DEFAULT_LAYER_VISIBILITY,
   planMapRender,
@@ -90,6 +91,8 @@ export function MapPage({
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [highlightId, setHighlightId] = useState('');
   const [fitSignal, setFitSignal] = useState(0);
+  /** 正在回放的行程。null = 没开回放层。 */
+  const [replayTrip, setReplayTrip] = useState<TripView | null>(null);
   const mapRef = useRef<MapHandle | null>(null);
 
   // 两个数据源拼成一份点列表：图层开关与渲染计划都只认 `MapPointInput`，
@@ -143,16 +146,21 @@ export function MapPage({
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
-      {/* 唯一底层：全屏地图 */}
+      {/* 唯一底层：全屏地图。
+          回放打开时**卸载**它，而不是隐藏：两张高德实例同时在跑时回放只有 43.8fps，
+          单地图的展示站同机 59fps；验证者也测过 `visibility:hidden` 无效（反而 37.2）。
+          代价：关闭回放后主地图会重新初始化，视野回到默认中心。 */}
       <div className="absolute inset-0">
-        <MapCanvas
-          ref={mapRef}
-          points={points}
-          jsKey={AMAP_JS_KEY}
-          securityCode={AMAP_SECURITY_CODE}
-          highlightId={highlightId}
-          fitSignal={fitSignal}
-        />
+        {replayTrip === null ? (
+          <MapCanvas
+            ref={mapRef}
+            points={points}
+            jsKey={AMAP_JS_KEY}
+            securityCode={AMAP_SECURITY_CODE}
+            highlightId={highlightId}
+            fitSignal={fitSignal}
+          />
+        ) : null}
       </div>
 
       {/* 左上角品牌条。pointer-events-none 让这块不挡住地图拖动，
@@ -241,6 +249,7 @@ export function MapPage({
             onSelectTrip={setSelectedTripId}
             jsKey={AMAP_JS_KEY}
             securityCode={AMAP_SECURITY_CODE}
+            onReplayTrip={setReplayTrip}
           />
         </SheetContent>
       </Sheet>
@@ -267,6 +276,16 @@ export function MapPage({
         onViewOnMap={(places) => {
           setShareSection(null);
           onViewOnMap?.(places);
+        }}
+      />
+
+      {/* 轨迹回放层：全屏模态，盖住整页。开关在 replayFlag（VITE_TRAIL_REPLAY）。 */}
+      <ReplayStage
+        trip={replayTrip}
+        photos={photos}
+        open={replayTrip !== null}
+        onOpenChange={(next) => {
+          if (!next) setReplayTrip(null);
         }}
       />
 

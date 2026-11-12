@@ -17,7 +17,7 @@
  * 转换发生在本模块内部（`wgs84ToGcj02`），**调用方永远只碰 WGS84**。
  */
 
-import { wgs84ToGcj02, type LngLat } from './coords';
+import { wgs84ToGcj02, type LngLat } from '@travelmemory/geo';
 
 /** 一个待渲染的点。`radius > 0` 是"画模糊圈"的充要条件。 */
 export interface MapPointInput {
