@@ -47,16 +47,27 @@ JS 侧是 npm workspaces（在仓库根 `npm install` 一次装完）：
 ```
 frontend/        主应用（React + TS + Capacitor）
 showcase/        轨迹回放展示站（深色 HUD，零后端依赖，可独立运行）
-packages/geo/    坐标与地图基础（主应用与展示站共用）
-packages/trail/  轨迹回放内核（样条/相机/时钟/投影/渲染器，不含 React）
-backend/         Python 后端
+packages/geo/         坐标与地图基础（主应用与展示站共用）
+packages/amap-loader/ 高德 JS API 2.0 加载原语（主应用与展示站共用）
+packages/trail/       轨迹回放内核（样条/相机/时钟/投影/渲染器，不含 React）
+backend/              Python 后端
 ```
 
-**依赖方向**：`宿主（frontend / showcase） → packages/trail → packages/geo`，单向不回头。
-内核里出现 React 就说明抽错了层——那是宿主的事。
+**依赖方向**：`宿主（frontend / showcase） → packages/trail → packages/geo`，单向不回头；
+`宿主 → packages/amap-loader` 是另一条并列箭头，**不经过回放内核**（主应用的地图相册
+不是回放，也要加载地图）。内核里出现 React 就说明抽错了层——那是宿主的事。
 
 **共享代码的判定标准**：两个及以上工作区都要用，且没有应用专属的错误文案 / UI 语义，
 才允许进 `packages/`。只被一个工作区用的抽象不进包——那是提前抽象。
+
+两条判据的正反例，都别再争论第二遍：
+
+- **该抽（`amap-loader`）**：去重、超时、script 复用、安全密钥配置是纯机制，两个宿主都要。
+  而「失败是抛给 UI 还是静默降级」「超时 15s 还是 8s」「要不要冷却重试」是策略，
+  **留在各自宿主的薄适配层**，调用点一行没改。合并前两份实现已经漂移出真 bug
+  （安全密钥字段一个写成 `securityCode`、一个写成官方的 `securityJsCode`），见 stage9 §6.1 坑 8。
+- **不该抽（`packages/share`）**：分享协议层目前只有 frontend 一个消费者，
+  隔壁 `trailshare` 明确不改动。抽了就是提前抽象，还多一份要同步的协议。
 
 ---
 

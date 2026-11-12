@@ -274,7 +274,9 @@ RETRIEVAL_MIN_SCORE=0.05
 frontend/   主应用：React + TS + Capacitor（Web / Android / iOS 同一套代码）
 showcase/   轨迹回放展示站：深色 HUD、零后端依赖，可独立运行
 packages/
-  geo/      坐标与地图基础：WGS84↔GCJ-02、Web 墨卡托、球面距离
+  amap-loader/ 高德 JS API 2.0 加载原语：去重、超时、script 复用、安全密钥
+            —— 主应用与展示站共用；两边的失败策略（抛错 / 降级）仍各自保留
+  geo/      坐标与地图基础：WGS84↔GCJ-02、Web 墨卡托、球面距离（纯函数，零依赖）
             —— 前端**唯一**的坐标转换入口，主应用与展示站共用
   trail/    轨迹回放内核：样条、里程、路段、相机、Canvas 渲染（纯逻辑，不含 React）
 backend/app/
@@ -285,7 +287,7 @@ backend/app/
   models/ 表结构      core/ 配置 / LLM / Redis 缓存 / feature flags
 research/   实验脚本与结果（不参与部署）
 deploy/     Nginx 与生产 Compose
-tools/      真机验收工具：帧率曲线 / 主应用回放复验 / CPU profile
+tools/      真机验收工具：帧率曲线 / 回放复验 / CPU profile / 地图加载器三处出图
             （都自包含，会自己拉起预览 + 无头浏览器；不参与构建与部署，别和 backend/app/tools 混了）
 docs/
   stages/   阶段复盘与原理讲解（stage0~9）

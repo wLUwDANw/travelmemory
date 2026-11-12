@@ -1,14 +1,19 @@
 /**
- * 底图适配层：高德 JS API 2.0 的动态加载、相机驱动、标定，以及无 Key / 加载失败时的降级格网底图。
+ * 底图适配层：高德 JS API 2.0 的相机驱动、标定，以及无 Key / 加载失败时的降级格网底图。
  *
  * 设计要点：
  *  - 不引入任何地图 SDK 的 npm 包，只用 <script> 动态加载；
  *  - 8 秒超时 + onerror 双保险，失败就降级，降级后播放/轨迹/HUD/时间轴照常工作；
  *  - 标定交给高德自己的 lngLatToContainer，避免整体错位。
+ *
+ * **加载机制已经抽到 `@travelmemory/amap-loader`**（去重 / 超时 / script 复用 /
+ * 安全密钥 / Node 守卫），主应用共用同一份。这里只留展示站的策略：静默降级、
+ * 占位 Key 判定、失败冷却重试 —— 主应用那边恰恰相反，失败要抛给 UI。
  */
 
 import { invMercX, invMercY, mercX, mercY } from '@travelmemory/geo';
 import { analyticProjection, TILE_SIZE, type Projection } from '@travelmemory/trail';
+import { loadAmapScript } from '@travelmemory/amap-loader';
 
 export type MapKind = 'amap' | 'fallback';
 export type CoordinateSystem = 'gcj02' | 'wgs84';
@@ -56,19 +61,16 @@ interface AMapNamespace {
 
 declare global {
   interface Window {
-    _AMapSecurityConfig?: { securityJsCode: string };
     AMap?: AMapNamespace;
   }
 }
 
-const SCRIPT_URL = 'https://webapi.amap.com/maps?v=2.0&key=';
+/** 展示站只给 8 秒，超时就降级，别让「用演示轨迹开始」卡住。 */
 const LOAD_TIMEOUT_MS = 8000;
 /** 失败后的重试冷却，避免反复插脚本 / 反复等 8 秒 */
 const RETRY_COOLDOWN_MS = 2500;
 const DARK_STYLE = 'amap://styles/dark';
 
-let cachedNamespace: AMapNamespace | null = null;
-let loadingPromise: Promise<AMapNamespace | null> | null = null;
 /** 未配置 Key（占位串）——这种情况重试也没有意义 */
 let noKey = false;
 /** 上次失败的时刻，用于冷却 */
@@ -91,74 +93,37 @@ function looksUnset(value: string): boolean {
 }
 
 /**
- * 加载高德 JS API；成功返回命名空间，失败/超时返回 null。
+ * 加载高德 JS API；成功返回命名空间，失败 / 超时返回 null（静默降级）。
  *
- * 失败**不永久缓存**：超时只代表「这一次 8 秒内没加载完」，不代表 SDK 不可用。
- * 之前把失败写死成模块级标记，导致 setup 里一次慢加载会把后续 play 也判死，
- * 底图永远走降级。现在改成冷却重试 + 复用已有 script 标签。
+ * 共享层统一用 reject 表示失败，这里把它折成 null —— 这是展示站与主应用唯一的
+ * 策略差异（那边要把错误抛给 UI）。失败**不永久缓存**：超时只代表「这一次 8 秒内
+ * 没加载完」，不代表 SDK 不可用，所以只做 2.5 秒冷却便允许重试。
+ * 复用还在路上的 script、超时那一刻脚本刚好到达则直接采纳，都由共享层负责。
  */
 export function loadAmap(): Promise<AMapNamespace | null> {
-  if (cachedNamespace) return Promise.resolve(cachedNamespace);
-
-  // 上一次超时之后脚本才加载完的情况：直接用现成的全局对象
-  if (typeof window !== 'undefined' && window.AMap) {
-    cachedNamespace = window.AMap;
-    return Promise.resolve(cachedNamespace);
-  }
   if (noKey) return Promise.resolve(null);
-  if (loadingPromise) return loadingPromise;
   if (failedAt > 0 && Date.now() - failedAt < RETRY_COOLDOWN_MS) return Promise.resolve(null);
 
   const key = readEnvKey();
-  const securityCode = readEnvSecurityCode();
   if (looksUnset(key)) {
     noKey = true;
     return Promise.resolve(null);
   }
 
-  loadingPromise = new Promise<AMapNamespace | null>((resolve) => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') {
-      resolve(null);
-      return;
-    }
-
-    let settled = false;
-    const finish = (namespace: AMapNamespace | null): void => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      // 关键：无论成败都释放 loadingPromise，让下一次调用有机会重试
-      loadingPromise = null;
-      if (namespace) {
-        cachedNamespace = namespace;
-        failedAt = 0;
-      } else {
-        failedAt = Date.now();
-      }
-      resolve(namespace);
-    };
-
-    const timer = window.setTimeout(() => finish(window.AMap ?? null), LOAD_TIMEOUT_MS);
-
-    if (securityCode.length > 0) {
-      // 必须在脚本插入前设置
-      window._AMapSecurityConfig = { securityJsCode: securityCode };
-    }
-
-    // 上一次的脚本可能还在路上：复用它，不要再插一个
-    const reuse = document.querySelector<HTMLScriptElement>('script[data-amap]');
-    const script = reuse ?? document.createElement('script');
-    script.onload = () => finish(window.AMap ?? null);
-    script.onerror = () => finish(null);
-    if (!reuse) {
-      script.src = `${SCRIPT_URL}${encodeURIComponent(key)}`;
-      script.async = true;
-      script.dataset.amap = '1';
-      document.head.appendChild(script);
-    }
-  });
-
-  return loadingPromise;
+  return loadAmapScript<AMapNamespace>({
+    key,
+    securityJsCode: readEnvSecurityCode(),
+    timeoutMs: LOAD_TIMEOUT_MS,
+  }).then(
+    (namespace) => {
+      failedAt = 0;
+      return namespace;
+    },
+    () => {
+      failedAt = Date.now();
+      return null;
+    },
+  );
 }
 
 /* ── 控制器 ──────────────────────────────────────────────────── */

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@travelmemory/amap-loader": "*",
     "@travelmemory/geo": "*",
     "@travelmemory/trail": "*",
     "@noble/curves": "^2.4.0",

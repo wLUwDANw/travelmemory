@@ -275,6 +275,11 @@ cards.update(...) / renderer.draw(...) / hud.update(...) / timeline.draw(...)
 packages/geo/src/            坐标与几何（纯函数，零依赖）
   coords.ts  mercator.ts  distance.ts  number.ts  index.ts  geo.test.ts
 
+packages/amap-loader/src/    高德 JS API 2.0 加载原语（两个宿主共用，jsdom 测试 14 条）
+  loader.ts                  去重 / 超时 / script 复用 / securityJsCode / Node 守卫
+  loader.test.ts             14 条行为契约（含「字段名不是 securityCode」回归）
+  index.ts                   对外唯一出口
+
 packages/trail/src/          回放内核（纯逻辑 + Canvas 2D，**不含 React**）
   types.ts                   数据模型（Photo / Journey / JourneySegment …）
   spline.ts                  向心 Catmull-Rom + 等弧长重采样
@@ -289,7 +294,7 @@ packages/trail/src/          回放内核（纯逻辑 + Canvas 2D，**不含 Rea
 
 showcase/src/                展示站（深色 HUD 宿主）
   App.tsx                    主循环 + 模式机（Landing / Setup / Play）
-  map/baseMap.ts             高德加载 / 控制器 / 降级格网
+  map/baseMap.ts             控制器 + 降级格网 + 展示站策略（失败返 null / 冷却重试）
   lib/exif.ts                客户端 JPEG EXIF（展示站专用，产品走后端）
   lib/thumb.ts               缩略图（串行队列 + canvas 手动定向）
   ui/PhotoCards.tsx          照片卡片
@@ -303,7 +308,7 @@ showcase/src/                展示站（深色 HUD 宿主）
 
 frontend/src/pages/MapPage/  主应用地图相册（回放已通过开关接入）
   replay/adapter.ts           TripView + PhotoListItem → Journey（时间三级回退）
-  replay/replayMap.ts         高德加载器（只给回放层用）
+  replay/replayMap.ts         回放专用的「只读」地图实例（加载走共享 amap-loader）
   replay/replayFlag.ts        灰度开关 VITE_TRAIL_REPLAY
   replay/ReplayStage.tsx      全屏 Radix Dialog + 单 rAF 主循环 + 键盘进度条
   replay/adapter.test.ts      适配器 12 条
@@ -315,14 +320,16 @@ tools/                        真机验收工具（都自包含：拉起预览 +
   perf-timeline.mjs           展示站帧率曲线（连采完整播放周期）
   verify-replay.mjs           主应用回放层：Fetch 域喂假数据 + 键盘/Esc/焦点 + 帧率曲线
   profile-replay.mjs          前后段 V8 CPU profile，按函数聚合 self time
+  verify-amap.mjs             三处地图真机出图 + 安全密钥字段 / script 去重 / 控制台报错
 docs/images/                  验收截图（播放中 / 播完 / 遮罩）
 docs/stages/stage9-trail-replay.md   本文档
 ```
 
 **依赖方向单向**：`宿主（frontend / showcase） → @travelmemory/trail → @travelmemory/geo`。
 内核不认识 React，也不知道自己有哪个宿主——这是它能被两套完全不同的界面复用的原因。
-注意两个宿主**各自保留一份高德加载器和主循环**（约 110 行重复）：契约不同，
-且目前零测试覆盖，合并前要先补测试（见 §8）。
+加载器已经合并（见 §6.1 坑 8），但两个宿主**仍各自保留一份主循环**：一个是
+React + Radix Dialog、一个是纯 DOM 模式机，强行统一会把两种生命周期硬绑在一起，不值得。
+合并加载器时守住了「机制进包、策略留宿主」这条线 —— 调用点一行没改。
 
 ---
 
@@ -347,11 +354,13 @@ npm run build --workspace=travel-memory-frontend
 node tools/perf-timeline.mjs 4189 9334 6 10        # 展示站帧率曲线（端口/CDP/窗口秒数/窗口数）
 node tools/verify-replay.mjs                       # 主应用：假数据 + 键盘/Esc/焦点 + 帧率
 node tools/profile-replay.mjs                      # 前后段 CPU profile 归因
+node tools/verify-amap.mjs                         # 三处地图出图 + 安全密钥字段 + 控制台
 ```
 
-**期望结果**：`frontend 339 passed` / `showcase 34 passed` / `trail 67 passed` / `geo 17 passed`
-（40 个文件、457 条）。帧率判据见 §1 出口条件第 1 条与 §6.4，**不要只采 10 秒**。
-`tools/verify-replay.mjs` 用 Fetch 域喂假数据，不需要 Postgres，也不改产品代码。
+**期望结果**：`frontend 339` / `showcase 34` / `amap-loader 14` / `trail 67` / `geo 17` passed
+（**41 个文件、471 条**）。帧率判据见 §1 出口条件第 1 条与 §6.4，**不要只采 10 秒**。
+`verify-replay.mjs` 与 `verify-amap.mjs` 都用 Fetch 域喂假数据，不需要 Postgres，
+也不改产品代码。
 
 **手动验收**（展示站）：
 
@@ -367,7 +376,7 @@ node tools/profile-replay.mjs                      # 前后段 CPU profile 归�
 
 ## 6. 踩过的坑（这一节最值钱）
 
-### 6.1 七个真 bug
+### 6.1 八个真 bug
 
 | # | 症状 | 根因 | 一个数字定位 |
 | --- | --- | --- | --- |
@@ -378,6 +387,7 @@ node tools/profile-replay.mjs                      # 前后段 CPU profile 归�
 | 5 | 拖窗口会让画布越来越大 | dpr ≥ 2 时 `resize()` 写回属性 → 下次读到翻倍 → 再写回 | `1440 → 2880 → 5760 …` |
 | 6 | 进度条键盘完全用不了（P2 无障碍） | 只有 `role="slider"` + `tabIndex={0}`，没有 `onKeyDown`：读屏用户能聚焦、按什么都没反应 | 已补 Arrow/PageUp/PageDown/Home/End + Shift 精调 + `aria-valuetext`；键位映射抽成 `sliderStep` 纯函数，7 条回归测试 + 真机键盘复验守着 |
 | 7 | 播放后段稳定掉到 46fps、p90 32.8ms | `Timeline.draw()` 每帧在写完卡片样式后调 `getBoundingClientRect()`，强制同步重排吃光帧预算，让每 3 帧一次的 `setCenter` 一顶就过线 | CPU profile 定位（329ms/10s）；尺寸测量搬进 `ResizeObserver` 缓存，p90 降到 16.5ms、长帧率 30–50% → ≤7%；契约测试 4 条守着，详见 §6.4 第五步 |
+| 8 | 主应用配了高德安全密钥却不生效 | 两份加载器各写一份，`frontend/amap.ts` 写成 `window._AMapSecurityConfig = { securityCode }`；高德官方字段是 **`securityJsCode`**（JS API 2.0 安全密钥文档），展示站那份写对了 | 抽 `packages/amap-loader` 统一机制（14 条测试含字段名回归）；三处地图真机验到 `config=["securityJsCode"]`、0 报错。**复制两份代码漂移出来的真 bug** |
 
 ### 6.2 四条方法论错误（比 bug 更值得记）
 
@@ -609,14 +619,22 @@ Home / ArrowRight / Shift+Right（+1%）/ PageUp（+10%）/ End / 到头不越�
 
 ## 8. 下一步（尚未做）
 
+> 原第 2 项「地图加载器合并」**已完成**：抽出 `packages/amap-loader`（14 条测试），
+> 两个宿主改成薄策略层、调用点零改动，顺带修掉 `securityCode` 字段漂移；
+> 三处地图真机验过 `config=["securityJsCode"]`、控制台 0 报错。详见 §6.1 坑 8。
+> 做法可复用的一句话：**机制进包，策略留宿主**。
+
 1. **偶发瓦片尖峰**：结构性掉帧已由时间轴 layout thrashing 修复（§6.4 第五步），
    目前只剩 p99 级偶发尖峰（到过 65ms），来自瓦片首次加载。若以后要再压，方向是
    播放前预取整条行程覆盖的瓦片 —— **不要再调 `setCenter` 间隔**，40/50/100ms 都试过且无效。
-2. **地图加载器合并**：`frontend/src/pages/MapPage/amap.ts` 与 `showcase/src/map/baseMap.ts`
-   里的 `loadAmap` 仍是两份（约 110 行），契约不同（一个抛异常给 UI，一个返回 null 并冷却重试）。
-   **合并前要先补测试**——这块目前零覆盖，同时改两个应用的地图加载风险太高。
-3. **`packages/share` 抽取**：分享模块目前只在 `frontend` 内，隔壁 `trailshare` 的协议层
-   尚未做对比审计（只读过目录，没动过那边一行）。抽包前先出协议对照表。
-4. **真实数据补齐**：主应用回放还没有照片卡片（`PhotoCards` 留在展示站）、缩略图未接通
+2. **`packages/share`：按现有规矩判为「先不抽」**。分享协议层
+   （`frontend/src/services/share/`）已从 TrailShare 的 `docs/REPLICATION.md`
+   （协议 ts-2026.4）移植过来，`schema / pack / unpack / filter / prepare` 与密码学层齐备，
+   独立演示侧就是隔壁那个完整 App —— 「既融入主项目又能独立演示」其实已经成立。
+   而 `PROJECT.md` 定的共享包判据是「两个及以上工作区都要用才进 `packages/`」：
+   目前只有 frontend 一个消费者（trailshare 明确不动），抽了就是提前抽象，
+   还平白多一份要同步的协议。若将来要消除「协议复制两份、可能对不上」的隐患，
+   更值的是加一份跨仓库协议对照检查，而不是搬目录。
+3. **真实数据补齐**：主应用回放还没有照片卡片（`PhotoCards` 留在展示站）、缩略图未接通
    （`PhotoListItem` 无 thumb，演示数据 `taken_at` 全 NULL）；`durationFor` 的 18s 下界
    让所有 <864km 的行程都统一播 18 秒，调参时是个盲区。
