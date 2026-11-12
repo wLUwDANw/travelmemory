@@ -9,7 +9,9 @@
  *
  * 60fps 下每帧 setState 会让 React 每 16ms 重渲染一次整棵树，回放立刻掉帧。
  * 所以进度百分比、进度条宽度、播放/暂停图标全部走 ref 直接改 DOM（4 帧节流一次），
- * React 只负责"开/关"和"数据变了重建"这两件低频的事。
+ * 沿途浮出的照片卡片也是每帧由 `cards.update()` 直接写 DOM。
+ * React 只负责"开/关"、"数据变了重建"和"本机缩略图取到了"这三件低频的事；
+ * 最后一件刻意不进主循环的 effect 依赖，否则缩略图一到位播放就被打回 0%。
  *
  * ## 相机为什么锚在相机值而不是"最后下发的中心"
  *
@@ -23,6 +25,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -47,6 +50,8 @@ import type { PhotoListItem } from '../../../services/api/photos';
 import type { TripView } from '../../../services/api/trips';
 import { buildReplayJourney } from './adapter';
 import { createReplayMap, type ReplayMapController } from './replayMap';
+import { PhotoCards, type PhotoCardsHandle } from './PhotoCards';
+import { loadReplayThumbs } from './thumbs';
 
 const AMAP_JS_KEY = (import.meta.env.VITE_AMAP_JS_KEY as string | undefined) ?? '';
 const AMAP_SECURITY_CODE = (import.meta.env.VITE_AMAP_SECURITY_CODE as string | undefined) ?? '';
@@ -59,7 +64,8 @@ const AMAP_SECURITY_CODE = (import.meta.env.VITE_AMAP_SECURITY_CODE as string | 
  * 掉帧来自镜头进入新区域时高德瓦片的动态加载，不是下发频率。
  * 完整调查见 docs/stages/stage9-trail-replay.md「帧率调查」。 */
 const CENTER_INTERVAL_MS = 40;
-/** 回放不画照片卡片，锚点数组保持空即可（渲染器会跳过引线） */
+/** 卡片句柄还没挂载到 ref 时的空锚点（渲染器会跳过引线）。
+ *  React 的 ref 在首帧 rAF 之前就已赋值，所以这基本只是个类型安全的兜底。 */
 const EMPTY_ANCHORS = new Float32Array(0);
 
 export interface ReplayStageProps {
@@ -133,6 +139,21 @@ function ReplayCanvas({ journey, title, subtitle, onClose }: ReplayCanvasProps) 
   const trackRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef(false);
   const resumeRef = useRef(false);
+  const cardsRef = useRef<PhotoCardsHandle | null>(null);
+  /** 本机 IndexedDB 里的真实缩略图。null = 还没取完 / 一张都没有。 */
+  const [thumbs, setThumbs] = useState<ReadonlyMap<string, string> | null>(null);
+
+  // 缩略图异步到达只触发**一次 React 重渲染**。主循环 useEffect 的依赖是
+  // [journey, clock]，这里没有动 journey，所以播放不会被重置、rAF 链不会重建。
+  useEffect(() => {
+    let cancelled = false;
+    void loadReplayThumbs(journey.photos.map((p) => p.id)).then((map) => {
+      if (!cancelled && map.size > 0) setThumbs(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [journey]);
 
   const clockRef = useRef<Clock | null>(null);
   if (clockRef.current === null) clockRef.current = new Clock();
@@ -289,12 +310,31 @@ function ReplayCanvas({ journey, title, subtitle, onClose }: ReplayCanvasProps) 
       setCamera(proj, camMx, camMy, proj.ox, proj.oy);
 
       const headGcj = wgs84ToGcj02(pose.lng, pose.lat);
+      const headMX = mercX(headGcj.lng);
+      const headMY = mercY(headGcj.lat);
+      const headScreenX = proj.ox + (headMX - proj.cx) * proj.scaleX;
+      const headScreenY = proj.oy + (headMY - proj.cy) * proj.scaleY;
+
+      // 照片卡片：每帧只**写** DOM（display / transform / opacity），不读任何几何。
+      // 顺序红线：本帧唯一的布局读 syncSize() 在帧首；从这里到帧尾全是写，
+      // 绝不能插入 getBoundingClientRect / offsetWidth / getComputedStyle ——
+      // 展示站那个 p90 32.8ms 的强制同步重排就是这么来的（stage9 §6.4 第五步）。
+      const cards = cardsRef.current;
+      if (cards) {
+        cards.update(scene, proj, pose.s, !clock.playing, now, headScreenX, headScreenY);
+        drawState.anchors = cards.anchors;
+        drawState.anchorCount = scene.photoCount;
+      } else {
+        drawState.anchors = EMPTY_ANCHORS;
+        drawState.anchorCount = 0;
+      }
+
       drawState.proj = proj;
       drawState.progressS = pose.s;
       drawState.nowMs = now;
       drawState.fallback = isFallback;
-      drawState.headMX = mercX(headGcj.lng);
-      drawState.headMY = mercY(headGcj.lat);
+      drawState.headMX = headMX;
+      drawState.headMY = headMY;
       renderer.draw(drawState);
 
       // 进度 UI：4 帧节流，直接写 DOM，不经过 React
@@ -376,6 +416,7 @@ function ReplayCanvas({ journey, title, subtitle, onClose }: ReplayCanvasProps) 
     <div className="replay-root">
       <div className="replay-map" ref={hostRef} />
       <canvas className="replay-canvas" ref={canvasRef} />
+      <PhotoCards ref={cardsRef} journey={journey} thumbs={thumbs ?? undefined} />
 
       <div className="replay-top">
         <div className="replay-heading">

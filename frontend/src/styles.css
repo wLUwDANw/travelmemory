@@ -516,6 +516,65 @@ body {
   pointer-events: none;
 }
 
+/* ── 回放里的照片卡片 ──────────────────────────────────────────────
+ *
+ * 从 showcase/src/styles.css 移植，但有三处本地化处理：
+ *  1. 全部加 `.replay-root` 前缀 —— `.card` 太通用，不能污染浅色主题的主界面；
+ *  2. 不引用 `var(--text)` / `var(--font-mono)`：前者在本文件是浅色主题的深色字
+ *     （会变成深底深字），后者主应用根本没定义。都写死深色值/具体字体栈；
+ *  3. **去掉 `backdrop-filter: blur(10px)`**：本文件开头的性能约定只允许小面积顶/底栏
+ *     用它。卡片底下本来就是深色地图，模糊几乎看不出，但 32 个节点每帧重采样会
+ *     实打实吃帧预算 —— 我们刚把 p90 从 32.8ms 修到 16.5ms，别把它请回来。
+ *     改用更不透明的底色达到同样的可读性。
+ *
+ * `display:none` 是必需的：卡片是绝对定位、每帧由 JS 写 transform/opacity 驱动。
+ * 若漏掉，32 个 div 会每帧进出文档流，那是真实重排（不是"写后读"，但一样卡）。
+ */
+.replay-root .card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5; /* 画布 3 之上，顶/底栏 10 之下 */
+  width: 132px;
+  height: 168px;
+  border-radius: 6px;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  background: rgba(8, 14, 24, 0.9);
+  overflow: hidden;
+  will-change: transform, opacity;
+  transform-origin: 50% 50%;
+  display: none;
+  pointer-events: none;
+}
+
+.replay-root .card-media {
+  width: 132px;
+  height: 112px;
+  background-size: cover;
+  background-position: center;
+}
+
+.replay-root .card-body {
+  padding: 7px 9px 0;
+}
+
+.replay-root .card-place {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #e6f1ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.replay-root .card-date {
+  margin-top: 3px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: rgba(124, 142, 166, 0.9);
+}
+
 .replay-top {
   position: absolute;
   left: 0;

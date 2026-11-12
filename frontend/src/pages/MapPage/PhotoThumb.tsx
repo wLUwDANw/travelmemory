@@ -35,42 +35,44 @@ export interface PhotoThumbProps {
  *  否则列表每重渲染一次就 `createObjectURL` 一遍，内存泄漏得无声无息。 */
 const urlCache = new Map<string, string>();
 
+/**
+ * 取（或建）一张缩略图的 objectURL。
+ *
+ * 抽成公开函数是为了让**回放层复用同一份缓存**：回放一次要取几十张，
+ * 若各自 createObjectURL，同一个 photoId 会建出一串 URL，内存无声泄漏。
+ * URL 的生命周期交给 `clearThumbUrlCache()`（导入新批次时统一 revoke），
+ * 调用方不要自己 revoke —— 别的组件可能还在用同一个 URL。
+ *
+ * 取不到一律返回 `null`，不抛异常：换过浏览器 / 清过 IndexedDB /
+ * 演示数据从没导入过照片，都是正常状态，调用方退回渐变占位即可。
+ */
+export async function getOrCreateThumbUrl(photoId: string): Promise<string | null> {
+  const cached = urlCache.get(photoId);
+  if (cached) return cached;
+  try {
+    const bytes = await resolveNativeBridge().thumbs.get(photoId, THUMB_MAX_EDGE);
+    if (!bytes || bytes.byteLength === 0) return null;
+    const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+    urlCache.set(photoId, objectUrl);
+    return objectUrl;
+  } catch {
+    return null;
+  }
+}
+
 export function PhotoThumb({ photoId, alt = '照片缩略图', className }: PhotoThumbProps) {
   const [url, setUrl] = useState<string | null>(() => urlCache.get(photoId) ?? null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    const cached = urlCache.get(photoId);
-    if (cached) {
-      setUrl(cached);
-      return;
-    }
-
-    let revoked: string | null = null;
     let cancelled = false;
-
-    void (async () => {
-      try {
-        const bytes = await resolveNativeBridge().thumbs.get(photoId, THUMB_MAX_EDGE);
-        if (cancelled) return;
-        if (bytes && bytes.byteLength > 0) {
-          const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
-          urlCache.set(photoId, objectUrl);
-          revoked = objectUrl;
-          setUrl(objectUrl);
-        } else {
-          setFailed(true);
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-
+    void getOrCreateThumbUrl(photoId).then((objectUrl) => {
+      if (cancelled) return;
+      if (objectUrl) setUrl(objectUrl);
+      else setFailed(true);
+    });
     return () => {
       cancelled = true;
-      // 不在这里 revoke：URL 进了缓存，还要给后续 render 用。
-      // 缓存的清理由 `clearThumbUrlCache()` 在导入新批次时统一做。
-      void revoked;
     };
   }, [photoId]);
 
