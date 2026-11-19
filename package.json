@@ -6,7 +6,9 @@
   "workspaces": [
     "frontend",
     "showcase",
-    "packages/*"
+    "packages/*",
+    "apps/track-studio",
+    "apps/trailshare-standalone"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",

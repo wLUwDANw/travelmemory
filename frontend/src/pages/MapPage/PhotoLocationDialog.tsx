@@ -16,8 +16,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
 
-import type { PhotoListItem } from '../../services/api/photos';
-import { patchPhotoLocation } from '../../services/api/photos';
+import { patchPhotoLocation, type PhotoListItem } from '../../services/api/photos';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import {

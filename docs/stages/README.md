@@ -16,8 +16,16 @@
 | `stage6-map-album.md` | 阶段 6：地图相册 + 跨端 + 隐私分享（W6-1 ~ W6-5） | ✅ 已全量交付（后端 pytest 447 passed / 11 skipped；前端 vitest 141 passed；W6-4 = 后端拉普拉斯地理模糊 + 前端 TrailShare 定向加密信物移植；真机双窗口与高德渲染待人工验证） |
 | `stage7-research.md` | 阶段 7：扩展方向（可选，独立分支） | 待开始 |
 | [stage9-trail-replay.md](./stage9-trail-replay.md) | **阶段 9：轨迹回放**（阶段 6 的延伸能力，非原定路线图阶段；编号 8 属于「多 Agent 引用审计」提案） | ✅ 已交付（前端 423 条测试全绿；展示站 10 秒采样 ≈60fps；光点滞后 45~52px；瓦片 0 abort）。**地图加载器仍是两份，合并前需先补测试** |
+| [stage10-track-studio-share-standalone.md](./stage10-track-studio-share-standalone.md) | 阶段 10：Track Studio + TrailShare Standalone（独立小应用） | ✅ 已交付（AI 执行，复盘见文件第二部分） |
+| [stage10-delivery-report.md](./stage10-delivery-report.md) | 阶段 10 **交付报告**（文件清单 / 测试 / 边界 / 差异） | ✅ 与阶段 10 任务书配套 |
+| [stage11-delivery-report.md](./stage11-delivery-report.md) | 阶段 11：**主应用接入**（iframe 嵌入 + 照片/身份注入 + 导回） | ✅ 已交付（任务书为对话交付，未单独落盘；细节见报告 §8–§12） |
+| [stage12-delivery-report.md](./stage12-delivery-report.md) | 阶段 12：**轨迹变速 + 位置补全 + 高德共享 + TrailShare 地图与收件人侧**（W12-1 ~ W12-5） | ✅ 已交付（682 条测试全绿；主应用 `StudioEmbed` 切 `embed.html` 仍为 A15 TODO） |
+| [stage13-track-studio-dual-theme.md](./stage13-track-studio-dual-theme.md) | 阶段 13：**双入口双主题 + 主应用指向 embed + showcase 退役 + 代码审计**（W13-1 ~ W13-7） | ✅ 已交付（756 条测试全绿；`apps/` 仍未纳入 git，见报告 §19） |
+| [stage13-code-audit.md](./stage13-code-audit.md) | 阶段 13 代码审计清单（极低 18 已合并 / 中 8 / 高 7） | ✅ 归档 |
+| [stage14-e2e-and-light-playstage.md](./stage14-e2e-and-light-playstage.md) | 阶段 14：**端到端验证 + 嵌入版浅色播放页 + 深色版补缺口 + 省市轮廓图**（W14-1 ~ W14-5） | ✅ 已交付（812 条测试全绿；分享包日期丢失与单地点 5 张上限两个 P1 待决策） |
+| [stage15-p1-fix-receive-library.md](./stage15-p1-fix-receive-library.md) | 阶段 15：**P1 修复 + 技术卫生 + 接收端接受/拒绝 + 记忆库分类**（W15-1 ~ W15-5） | ✅ 已交付（886/984 条测试全绿；W15-2 改自动拆分、W15-5 降级在行程抽屉） |
 
-文件名规则：`stage<编号>-<主题>.md`，编号与设计文档第十一章保持一致。
+文件名规则：`stage<编号>-<主题>.md`，编号与设计文档第十一章保持一致；配套的交付报告统一命名为 `stage<编号>-delivery-report.md`，与阶段文档放在同一目录。
 
 ## 每份文档固定包含
 

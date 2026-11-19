@@ -36,10 +36,19 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { BadgeCheck, ChevronLeft, Route, ShieldCheck, Sparkles } from 'lucide-react';
+import {
+  BadgeCheck,
+  ChevronLeft,
+  Clapperboard,
+  MapPin,
+  Route,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
 
 import type { PhotoListItem } from '../../services/api/photos';
 import type { TripView } from '../../services/api/trips';
+import type { StudioMode } from '../../services/studio-bridge/types';
 import type { UnpackedPlace } from '../../types/share';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -47,6 +56,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { toast } from '../../components/ui/use-toast';
 import { findPointForEvidence } from '../../lib/mapView';
 import { ChatPanel } from '../AgentPage/ChatPanel';
+import { LocationEditor } from '../LocationEditor/LocationEditor';
+import { StudioEmbed } from '../StudioEmbed/StudioEmbed';
 import { MapCanvas, type MapHandle } from './MapCanvas';
 import { ShareDialog, type ShareSection } from './ShareDialog';
 import { TripDrawer } from './TripDrawer';
@@ -93,6 +104,10 @@ export function MapPage({
   const [fitSignal, setFitSignal] = useState(0);
   /** 正在回放的行程。null = 没开回放层。 */
   const [replayTrip, setReplayTrip] = useState<TripView | null>(null);
+  /** 正在嵌入的小应用（阶段 11）。null = 没开。`mode` 决定嵌哪一个。 */
+  const [studio, setStudio] = useState<{ mode: StudioMode; trip?: TripView } | null>(null);
+  /** 批量补全照片位置面板（W12-2b）。 */
+  const [locationEditorOpen, setLocationEditorOpen] = useState(false);
   const mapRef = useRef<MapHandle | null>(null);
 
   // 两个数据源拼成一份点列表：图层开关与渲染计划都只认 `MapPointInput`，
@@ -113,6 +128,33 @@ export function MapPage({
     await onTripsChanged?.();
     setFitSignal((n) => n + 1);
   }, [onTripsChanged]);
+
+  /** 待补位置的照片数（W12-2b）。用后端的 `hasLocation`，**不拿 lat 判空**。 */
+  const missingLocationCount = useMemo(
+    () => photos.filter((photo) => !photo.hasLocation).length,
+    [photos],
+  );
+
+  /**
+   * 打开「补全照片位置」面板。
+   *
+   * 一张都不缺时不打开，只回一句 toast：打开一个空面板会让人以为功能坏了。
+   * 打开时顺手关掉另外两个抽屉（它们与地图抢同一块可视区域）。
+   */
+  const openLocationEditor = useCallback(() => {
+    if (missingLocationCount === 0) {
+      toast({
+        variant: 'success',
+        title: '所有照片都有位置',
+        description: '照片库里的照片都带坐标，不需要补全。',
+      });
+      return;
+    }
+    setTripDrawerOpen(false);
+    setChatOpen(false);
+    setShareSection(null);
+    setLocationEditorOpen(true);
+  }, [missingLocationCount]);
 
   /** 点 AI 回答里的引用 `[n]` → 飞到对应证据并高亮。 */
   const handleLocate = useCallback(
@@ -199,6 +241,38 @@ export function MapPage({
           <ShieldCheck className="h-4 w-4" />
           验证信物
         </Button>
+        {/* 阶段 11：把独立小应用（Track Studio）以全屏 iframe 嵌进来。
+            与上面两个按钮不同，这一个不碰浮层互斥 —— 它自己就是全屏模态。 */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="justify-start bg-background/90 shadow-md backdrop-blur hover:bg-background"
+          onClick={() => setStudio({ mode: 'track' })}
+        >
+          <Clapperboard className="h-4 w-4" />
+          轨迹演示
+        </Button>
+        {/* W12-2b：批量补全照片位置。缺坐标照片多时，逐张点「补标」太慢；
+            这里一次点地图就把一张补上，补完自动从列表里消失。 */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="justify-start bg-background/90 shadow-md backdrop-blur hover:bg-background"
+          onClick={openLocationEditor}
+          title={
+            missingLocationCount > 0
+              ? `还有 ${missingLocationCount} 张照片没有位置`
+              : '所有照片都有位置'
+          }
+        >
+          <MapPin className="h-4 w-4" />
+          补全照片位置
+          {missingLocationCount > 0 && (
+            <Badge variant="muted" className="ml-1">
+              {missingLocationCount}
+            </Badge>
+          )}
+        </Button>
         <p className="max-w-[200px] pl-1 text-[11px] leading-relaxed text-muted-foreground">
           模糊圈半径是<strong>承诺半径</strong>，不是本次实际偏移量 —— 真实位置只在圈内某处。
         </p>
@@ -250,6 +324,7 @@ export function MapPage({
             jsKey={AMAP_JS_KEY}
             securityCode={AMAP_SECURITY_CODE}
             onReplayTrip={setReplayTrip}
+            onShareTrip={(trip) => setStudio({ mode: 'share', trip })}
           />
         </SheetContent>
       </Sheet>
@@ -302,6 +377,29 @@ export function MapPage({
           {plan.hidden > 0 && <Badge variant="muted">已隐藏 {plan.hidden}</Badge>}
         </div>
       </div>
+
+      {/* W12-2b：批量补全照片位置。Key / 安全密钥**从这一层传下去**（组件自己不读
+          import.meta.env）；补标成功后走 handleTripsChanged 刷新照片库与地图。 */}
+      <LocationEditor
+        open={locationEditorOpen}
+        photos={photos}
+        jsKey={AMAP_JS_KEY}
+        securityCode={AMAP_SECURITY_CODE}
+        onTripsChanged={handleTripsChanged}
+        onClose={() => setLocationEditorOpen(false)}
+      />
+
+      {/* 阶段 11：独立小应用的全屏嵌入层。打开时挂载 iframe，关闭时卸载（含子文档）。
+          `mode` 决定嵌 track-studio（5174）还是 trailshare-standalone（5175）；
+          `trip` 只有 share 模式才有值。 */}
+      <StudioEmbed
+        open={studio !== null}
+        mode={studio?.mode ?? 'track'}
+        trip={studio?.trip}
+        photos={photos}
+        onTripsChanged={handleTripsChanged}
+        onClose={() => setStudio(null)}
+      />
     </div>
   );
 }

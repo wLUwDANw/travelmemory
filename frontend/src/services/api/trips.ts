@@ -140,6 +140,23 @@ function resolveBaseUrl(options?: TripsApiOptions): string {
   return raw.replace(/\/+$/, '');
 }
 
+/**
+ * 写请求（POST / PATCH）统一用的 JSON 请求头。
+ *
+ * ## 为什么收敛成一个函数
+ *
+ * 三处调用（`createTrip` / `renameTrip` / `assignTripPhotos`）都是
+ * `JSON.stringify` 出来的 body，头必须逐字节一致 —— 复制粘贴三份的代价是
+ * 哪天要给写请求加一个头（例如幂等键），漏改一处的表现是「接口偶发 415」，
+ * 而单测里 mock 的 fetch 往往不校验头，测不出来。
+ *
+ * 这里**不**拼任何鉴权头：后端鉴权走 cookie / 同源代理，
+ * 前端从来没有 `Authorization`，不要顺手加上。
+ */
+function jsonHeaders(): Record<string, string> {
+  return { 'Content-Type': 'application/json' };
+}
+
 function resolveFetch(options?: TripsApiOptions): typeof fetch {
   const impl = options?.fetchImpl ?? override?.fetchImpl ?? globalThis.fetch;
   if (typeof impl !== 'function') {
@@ -196,7 +213,7 @@ export async function createTrip(title: string, options?: TripsApiOptions): Prom
   try {
     response = await resolveFetch(options)(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders(),
       body: JSON.stringify({ title }),
     });
   } catch (err) {
@@ -239,7 +256,7 @@ export async function renameTrip(
   try {
     response = await resolveFetch(options)(url, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders(),
       body: JSON.stringify({ title }),
     });
   } catch (err) {
@@ -314,7 +331,7 @@ export async function assignTripPhotos(
   try {
     response = await resolveFetch(options)(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders(),
       body: JSON.stringify({ photo_ids: photoIds }),
     });
   } catch (err) {

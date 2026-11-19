@@ -30,6 +30,9 @@
 import { type ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 import {
   CheckCheck,
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
   ImageDown,
   Layers,
   Loader2,
@@ -39,6 +42,7 @@ import {
   Play,
   Plus,
   Route,
+  Share2,
   Trash2,
 } from 'lucide-react';
 
@@ -75,6 +79,7 @@ import { PhotoThumb } from './PhotoThumb';
 import { RenameTripDialog } from './RenameTripDialog';
 import { TRAIL_REPLAY_ENABLED } from './replay/replayFlag';
 import type { LayerVisibility } from './layers';
+import { groupFriendsBySender, splitTrips, type TripScope } from './tripScope';
 
 export type DrawerTab = 'trips' | 'photos';
 
@@ -98,6 +103,11 @@ export interface TripDrawerProps {
    * 这样现有的抽屉测试与其它调用点都不用改。
    */
   onReplayTrip?: (trip: TripView) => void;
+  /**
+   * 分享这条行程（阶段 11：嵌入 TrailShare 独立小应用）。
+   * **可选**，与 `onReplayTrip` 同款约定：不传 = 不显示按钮。
+   */
+  onShareTrip?: (trip: TripView) => void;
 }
 
 export function TripDrawer({
@@ -112,8 +122,13 @@ export function TripDrawer({
   jsKey,
   securityCode = '',
   onReplayTrip,
+  onShareTrip,
 }: TripDrawerProps) {
   const [tab, setTab] = useState<DrawerTab>('trips');
+  /** W15-5：行程的范围——自己建的 / 朋友发来的。默认「我的」（老行为不变）。 */
+  const [scope, setScope] = useState<TripScope>('mine');
+  /** 展开中的发件人文件夹（默认全收起：朋友多了不该一屏全是名字）。 */
+  const [expandedSenders, setExpandedSenders] = useState<ReadonlySet<string>>(new Set());
   const [tripDialogOpen, setTripDialogOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<TripView | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TripView | null>(null);
@@ -130,6 +145,131 @@ export function TripDrawer({
     [trips, selectedTripId],
   );
   const unlocatedCount = photos.filter((photo) => !photo.hasLocation).length;
+
+  /* ── W15-5：按发件人分类（纯函数，见 `tripScope.ts`） ───────────
+   *
+   * `mine` 用于「我的」列表，`friendGroups` 用于「朋友的」列表。
+   * 两个都 `useMemo`：分组结果决定渲染树，每帧重算会让折叠状态跟着抖。
+   */
+  const { mine, friends } = useMemo(() => splitTrips(trips), [trips]);
+  const friendGroups = useMemo(() => groupFriendsBySender(friends), [friends]);
+
+  const toggleSender = useCallback((sender: string) => {
+    setExpandedSenders((prev) => {
+      const next = new Set(prev);
+      if (next.has(sender)) next.delete(sender);
+      else next.add(sender);
+      return next;
+    });
+  }, []);
+
+  /**
+   * 一行行程。
+   *
+   * `friend = true` 时（朋友的行程）**砍掉"分享 / 重命名 / 删除"**：
+   *  - 分享：把别人发给你的东西再发给第三个人，不是这个功能的语义；
+   *  - 重命名：标题前缀是发件人的唯一线索，改名会让它从分组里掉出去；
+   *  - 删除：这不是你的行程（要删应该由发件人那边处理）。
+   * 只保留回放 —— 看得见、能看，就够。
+   */
+  const renderTripRow = (trip: TripView, friend: boolean) => {
+    const unlocated = trip.items.filter((item) => typeof item.lat !== 'number').length;
+    const active = trip.id === selectedTripId;
+    return (
+      <li key={trip.id}>
+        <div
+          className={`rounded-lg border px-3 py-2 transition-all duration-150 ${
+            active
+              ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/30'
+              : 'hover:bg-accent/60 hover:shadow-sm'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className="flex-1 truncate text-left text-sm font-medium"
+              onClick={() => onSelectTrip(active ? null : trip.id)}
+              aria-pressed={active}
+            >
+              {trip.title}
+            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              {TRAIL_REPLAY_ENABLED && onReplayTrip ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                  aria-label={`回放行程 ${trip.title}`}
+                  onClick={() => onReplayTrip(trip)}
+                >
+                  <Play className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
+              {/* 阶段 11：把这一趟交给 TrailShare 小应用打包成信物。
+                  只在调用方传了 `onShareTrip` 时出现（不传 = 旧行为不变）。
+                  朋友的行程不给分享入口（见函数注释）。 */}
+              {!friend && onShareTrip ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                  aria-label={`分享行程 ${trip.title}`}
+                  onClick={() => onShareTrip(trip)}
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
+              {!friend && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                    aria-label={`重命名行程 ${trip.title}`}
+                    onClick={() => setRenameTarget(trip)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`删除行程 ${trip.title}`}
+                    onClick={() => setDeleteTarget(trip)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </>
+              )}
+              <Badge variant={trip.source === 'manual' ? 'outline' : 'muted'}>
+                {trip.source === 'manual' ? '手工' : '聚类'}
+              </Badge>
+            </div>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>{formatRange(trip.startedAt, trip.endedAt)}</span>
+            <span className="inline-flex items-center gap-1">
+              <MapPin className="h-3 w-3" />
+              {trip.items.length} 个地点
+            </span>
+            {unlocated > 0 && (
+              <span className="inline-flex items-center gap-1 text-amber-700">
+                <MapPinOff className="h-3 w-3" />
+                {unlocated} 个未定位
+              </span>
+            )}
+          </div>
+          {/* 朋友的行程多一行小字：同一发件人的标题往往只差「 · 地点」，
+              只靠标题分不清哪趟是哪趟 */}
+          {friend && (
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {dayOf(trip.startedAt) ?? '日期未知'} · {trip.itemCount} 张照片
+            </div>
+          )}
+        </div>
+      </li>
+    );
+  };
 
   const pickFiles = useCallback(() => inputRef.current?.click(), []);
 
@@ -300,6 +440,39 @@ export function TripDrawer({
               新建旅程
             </Button>
 
+            {/* W15-5：范围切换（分段控件）。用 aria-pressed 而不是 role="tab" ——
+                这个抽屉已经有一个 tablist（行程/照片库），再套一层 tab 会让
+                屏幕阅读器把两组互不相关的切换当成同一组。 */}
+            <div
+              className="grid grid-cols-2 gap-1 rounded-lg border p-1"
+              role="group"
+              aria-label="行程范围"
+            >
+              {(
+                [
+                  { key: 'mine' as const, label: '我的', count: mine.length },
+                  { key: 'friends' as const, label: '朋友的', count: friends.length },
+                ] satisfies Array<{ key: TripScope; label: string; count: number }>
+              ).map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  aria-pressed={scope === item.key}
+                  onClick={() => setScope(item.key)}
+                  className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    scope === item.key
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
+                >
+                  {item.label}
+                  {item.count > 0 && (
+                    <span className="text-[11px] text-muted-foreground">{item.count}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
             <p className="text-xs leading-relaxed text-muted-foreground">
               旅程是<strong>空的视图</strong>：建好后到「照片库」勾选照片加入。删旅程不会删照片。
             </p>
@@ -313,87 +486,73 @@ export function TripDrawer({
 
             <Separator />
 
-            {trips.length === 0 ? (
+            {scope === 'mine' ? (
+              mine.length === 0 ? (
+                <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+                  还没有旅程。点「新建旅程」开始。
+                </p>
+              ) : (
+                <ul className="space-y-2">{mine.map((trip) => renderTripRow(trip, false))}</ul>
+              )
+            ) : friends.length === 0 ? (
               <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                还没有旅程。点「新建旅程」开始。
+                还没有朋友分享的旅程。让对方在 TrailShare 里点「接受并导回」。
               </p>
             ) : (
-              <ul className="space-y-2">
-                {trips.map((trip) => {
-                  const unlocated = trip.items.filter((item) => typeof item.lat !== 'number').length;
-                  const active = trip.id === selectedTripId;
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  已收到 {friendGroups.length} 位朋友分享的 {friends.length} 趟旅程
+                </p>
+                {friendGroups.map((group) => {
+                  const expanded = expandedSenders.has(group.sender);
                   return (
-                    <li key={trip.id}>
-                      <div
-                        className={`rounded-lg border px-3 py-2 transition-all duration-150 ${
-                          active
-                            ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/30'
-                            : 'hover:bg-accent/60 hover:shadow-sm'
-                        }`}
+                    <div key={group.sender} className="rounded-lg border">
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-accent/60"
+                        aria-expanded={expanded}
+                        onClick={() => toggleSender(group.sender)}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <button
-                            type="button"
-                            className="flex-1 truncate text-left text-sm font-medium"
-                            onClick={() => onSelectTrip(active ? null : trip.id)}
-                            aria-pressed={active}
-                          >
-                            {trip.title}
-                          </button>
-                          <div className="flex shrink-0 items-center gap-1">
-                            {TRAIL_REPLAY_ENABLED && onReplayTrip ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                                aria-label={`回放行程 ${trip.title}`}
-                                onClick={() => onReplayTrip(trip)}
-                              >
-                                <Play className="h-3.5 w-3.5" />
-                              </Button>
-                            ) : null}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                              aria-label={`重命名行程 ${trip.title}`}
-                              onClick={() => setRenameTarget(trip)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                              aria-label={`删除行程 ${trip.title}`}
-                              onClick={() => setDeleteTarget(trip)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Badge variant={trip.source === 'manual' ? 'outline' : 'muted'}>
-                              {trip.source === 'manual' ? '手工' : '聚类'}
-                            </Badge>
-                          </div>
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                          <span>{formatRange(trip.startedAt, trip.endedAt)}</span>
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            {trip.items.length} 个地点
-                          </span>
-                          {unlocated > 0 && (
-                            <span className="inline-flex items-center gap-1 text-amber-700">
-                              <MapPinOff className="h-3 w-3" />
-                              {unlocated} 个未定位
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </li>
+                        {expanded ? (
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate">来自 {group.sender}</span>
+                        <span className="shrink-0 text-[11px] text-muted-foreground">
+                          {group.trips.length} 趟
+                        </span>
+                      </button>
+                      {expanded && (
+                        <ul className="space-y-2 border-t px-2 py-2">
+                          {group.trips.map((trip) => renderTripRow(trip, true))}
+                        </ul>
+                      )}
+                    </div>
                   );
                 })}
-              </ul>
+              </div>
             )}
+
+            {/* W15-5：地图叠加留到阶段 16。**故意做成 disabled + 写明原因**，
+                而不是先接上"看起来能点但点了没反应"的开关。 */}
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-dashed px-3 py-2">
+              <Checkbox
+                id="layer-friend-share"
+                checked={false}
+                disabled
+                aria-label="在地图上显示朋友的分享"
+                title="地图叠加待阶段 16：现在打开会画出不属于你的点，容易误认成自己拍的照片"
+              />
+              <Label
+                htmlFor="layer-friend-share"
+                className="flex flex-1 cursor-not-allowed flex-col gap-0.5 text-xs font-normal opacity-70"
+              >
+                <span>在地图上显示朋友的分享</span>
+                <span className="text-[11px] text-muted-foreground">（地图叠加待阶段16）</span>
+              </Label>
+            </div>
           </div>
         </ScrollArea>
       )}
