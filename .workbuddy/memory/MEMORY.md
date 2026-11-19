@@ -96,3 +96,12 @@
   阶段 5 做聚合归因时需处理
 - 历史对话进上下文前必须剥掉 `[n]`（`context_builder._fit_history`），
   否则上一轮编号会造成本轮"引用越界"误拒答
+
+## 版本基线（2026-11-19）
+
+- `apps/` 与 `packages/journey-transfer|photo-source` 已于 **d5b19b8** 纳入 git
+  （226 files，+42,023），随后 **5056bb8** 更正阶段 15 报告；`main` 已推 origin，`ahead=0`。
+- 此后「零改动」声明必须用 `git diff` 证明，不再接受 mtime 自证。
+- 本机 Git 曾报 `schannel: CRYPT_E_NO_REVOCATION_CHECK`，已在仓库本地设
+  `http.schannelCheckRevoke=false` 才推得动；换机器/网络时可能需要同样设置。
+- 阶段 10–15 的交付报告都在 `docs/stages/`，索引见 `docs/stages/README.md`。
