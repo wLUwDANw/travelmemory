@@ -4,7 +4,7 @@
 > 日期：2026-11-16
 > 任务书：阶段 15 W15-1 ~ W15-5（对话交付）
 > 结论：**五个工作块全部交付**；核心六套测试 **886 全绿**（frontend 432 / trailshare 168 / track-studio 175 / showcase 34 / journey-transfer 21 / photo-source 56），全仓含 geo/amap/trail 共 **984**；三个构建通过；W15-1 由 FAIL 转 PASS（日期回填 2025-10-02）；W15-2 因协议红线改为自动拆分；W15-5 降级实现（无 Library 页面）。
-> 遗留两个 P1（不在本轮允许清单）：导回主应用后「日期未知 / 未定位」；`apps/` 基线仍未达成。
+> 遗留一个 P1（不在本轮允许清单）：导回主应用后「日期未知 / 未定位」。`apps/` 基线已在收尾时提交（`d5b19b8`）。
 
 ---
 
@@ -136,7 +136,7 @@ groupFriendsBySender(trips): Array<{ sender, trips }>;
 ### 17.1 未修（不在本轮允许清单）
 
 1. **导回主应用后「日期未知 / 5 个未定位」（P1）**：`frontend/src/services/journey-import/journeyToTrip.ts:211-214` 没有把 `days[0].date` 写进 `trip.started_at`；`:305-322` 先 `assignTripPhotos` 再补坐标，`trip_item` 快照 lat/lng 为 null。修复需要改这个文件（本轮只允许 StudioEmbed 一行），已在报告里给出位置。
-2. **`apps/` 基线未达成**：`git ls-files apps` = **0**，`git ls-files packages/journey-transfer packages/photo-source` = **0**。本轮所有"零改动"只能靠 mtime 自证，**无法用 git diff 审计**；未 `git add`。
+2. **`apps/` 基线（交付后已达成）**：交付时 `git ls-files apps` = 0；收尾由用户提交并推送 **`d5b19b8`**（226 files，+42,023），现 `git ls-files apps` = **145**、`git ls-files packages/journey-transfer packages/photo-source` = **22**。本轮改动的"零改动"声明在当时仍只能靠 mtime 自证（提交晚于改动），但从此基线可审计。
 
 ### 17.2 降级 / 差异
 
@@ -175,8 +175,17 @@ showcase 34 / 4；journey-transfer 21 / 2；photo-source 56 / 4
 ```
 6. **W15-1 日期**：改前 2026-11-15（导入当天）→ 改后 **2025-10-02**（照片实拍最早一天；6 张跨 10-02~10-04）。日期框、包内 `date`、独立版显示三处一致。
 7. **W15-2 改了哪几处 5**：只改应用层调用顺序与拆分函数；`MAX_PHOTOS_PER_PLACE=5`（`schema.ts:36`）、`pack.ts:217`、`schema.ts:134` **未动**；`buildTrip.ts` 注释与文案改了 3 处。
-8. **W15-3**：reindex 135/135；`app.cli --check` 无向量告警；`git ls-files apps` = 0（基线未达成）。
+8. **W15-3**：reindex 135/135；`app.cli --check` 无向量告警；`git ls-files apps` = **145**（收尾提交 `d5b19b8` 后；交付时为 0）。
 9. **W15-4**：无新增后端接口；IndexedDB 库 `trailshare-received` / store `places` / keyPath `id`；记录字段见 §14.2。
 10. **W15-5 证据**：CDP 实测「我的 3 / 朋友的 1」、文件夹「来自 我 / 1 趟」、展开后行「2026-10-05 · 3 张照片」、无分享/重命名/删除、勾选框 disabled；截图 `F:/temp/qa15-friends.png`。
 11. **TODO(歧义)**：`journeyToTrip.ts` 两个既有 TODO（未动）；`receivedStore` 大图缩放 TODO；`photoMetaFromDrafts` 拆分后位置错位未修；W15-5 地图叠加 TODO。
-12. **已知未完成**：见 §17（导回日期/坐标、基线、地图叠加、缩略图丢弃）。
+12. **已知未完成**：见 §17（导回日期/坐标、地图叠加、缩略图丢弃）。
+
+---
+
+## 补记（收尾，2026-11-19）
+
+- 用户完成基线提交并推送：**`d5b19b8`**（226 files，+42,023），`main -> origin/main`。
+- `git ls-files apps` = **145**、`git ls-files packages/journey-transfer packages/photo-source` = **22**，基线已达成；后续阶段的"零改动"可以真正用 diff 审计。
+- 仓库根残留 `tatus --short`（某次 `git diff --stat` 输出误重定向的文件）**未纳入提交**，待删。
+- 三个端口的人工验收由用户执行；本报告记录的是 QA 的 CDP 验收结果（见 §9）。
