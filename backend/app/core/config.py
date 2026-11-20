@@ -34,7 +34,11 @@ class Settings(BaseSettings):
 
     # ---------------- 基础（阶段 0） ----------------
     database_url: str = "postgresql+asyncpg://user:pass@localhost:5432/travel_memory"
-    agent_runtime: str = "pipeline"  # pipeline（阶段 0~3）| graph（阶段 4+）
+    #: 运行时。阶段 16 起默认 `graph`：`make eval` 与线上必须同源。
+    #: 设成未知值或 langgraph 未安装时会回落 `pipeline`（降级而不是抛错）。
+    agent_runtime: str = "graph"  # pipeline（阶段 0~3）| graph（阶段 4+）
+    #: self_check 未通过后允许的**重试次数**（两种运行时共用这一个值）
+    agent_generate_retries: int = 1
     log_level: str = "INFO"
 
     # ---------------- LLM（DeepSeek / Qwen，统一 OpenAI 兼容协议） ----------------
@@ -159,14 +163,11 @@ class Settings(BaseSettings):
     amap_max_retries: int = 1
     tool_timeout_sec: float = 8.0
     tool_max_retries: int = 1
-    #: 单位时间内每用户的工具调用上限（保护高德配额，超限降级而非报错）
-    tool_rate_limit_per_min: int = 30
 
     # ---------------- 阶段 3：缓存 ----------------
     cache_backend: str = "auto"  # auto | memory | redis | null
     cache_max_entries: int = 5000  # InMemoryCache 的 LRU 上限
     redis_socket_timeout_sec: float = 1.0
-    session_window_max: int = 20  # ③ 短期会话滑动窗口长度
 
     # ---------------- 阶段 3：Rerank / HNSW ----------------
     rerank_base_url: str = ""  # 留空时复用 LLM_BASE_URL
@@ -187,27 +188,22 @@ class Settings(BaseSettings):
     retrieval_use_ann: bool = False
     retrieval_hnsw_oversample: int = 4
 
-    # ---------------- 阶段 6+（占位）----------------
-    minio_endpoint: str = ""
-    minio_access_key: str = ""
-    minio_secret_key: str = ""
-
     # ---------------- 阶段 6 扩展开关（默认全关，PROJECT.md §二、[8]）----------------
     #: W6-1 本地照片导入（EXIF 解析 + 内容指纹去重）
     photo_import_enabled: bool = False
-    #: W6-2 行程自动聚类 + 地图相册
-    map_album_enabled: bool = False
-    #: W6-3 端能力抽象（原生相册 / 缩略图缓存 / 权限）
-    native_bridge_enabled: bool = False
     #: W6-4 地理模糊（后端）+ 定向加密信物（前端）
     privacy_enabled: bool = False
 
     # ---------------- 扩展开关（阶段 7，默认全关）----------------
     semantic_enabled: bool = False
-    zk_enabled: bool = False
-    chain_enabled: bool = False
-    privacy_version: str = "privacy-2026.1"
-    semantic_tag_version: str = "sem-2026.2"
+
+    # 阶段 16 删除的死配置（声明了但全仓 0 引用）：
+    #   map_album_enabled / native_bridge_enabled —— 前端能力，后端从未读取；
+    #   zk_enabled / chain_enabled —— 从未有实现；
+    #   minio_* —— 存储方案未落地；
+    #   tool_rate_limit_per_min —— 宣称限流但没有任何实现；
+    #   privacy_version / semantic_tag_version —— 契约版本，不该由环境变量控制，
+    #     语义版本的真相源是 `utils/semantic_tags.py::SEMANTIC_TAG_VERSION`。
 
     # ---------------- 派生属性 ----------------
     @property

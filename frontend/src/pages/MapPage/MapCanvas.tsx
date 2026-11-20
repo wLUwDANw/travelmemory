@@ -150,12 +150,19 @@ export const MapCanvas = forwardRef<MapHandle, MapCanvasProps>(function MapCanva
           }),
         );
       } else {
+        // 高亮的 Marker 显示名字；朋友的分享**常显**标签 —— 它和本机照片长得一样，
+        // 不标出来就会被当成"我去过这里"（W15-5 明确要防的误认）。
+        const isFriend = item.source === 'friend';
+        const labelContent = highlighted
+          ? (item.name ?? '已选中')
+          : isFriend
+            ? '朋友的分享'
+            : '';
         created.push(
           new amap.Marker({
             position: [item.position.lng, item.position.lat],
             extData: { id: item.id, name: item.name },
-            // 高亮的 Marker 加一个文字标签，圈和点两种形态都能被看见
-            label: highlighted ? { content: item.name ?? '已选中', direction: 'top' } : undefined,
+            label: labelContent ? { content: labelContent, direction: 'top' } : undefined,
           }),
         );
       }

@@ -183,7 +183,7 @@
 | **D-2** | 9 个 `pytest` skip 用例转真实库覆盖 | 同上；且它们都是已通过的阶段 0~2 逻辑，不影响阶段 3 正确性 | 同上；阶段 6（W6-1）导入链路需要真实库时 |
 | **D-3** | 填充空目录：`agent/memory/`、`nodes/graph/`、`frontend/src/components/{ui,business}`、`pages/MapPage`、`pages/SharePage`、`workers/` | 它们是阶段 4 / 6 的**预留位**，不是缺陷；提前填充等于跨阶段并行（违反 PROJECT.md 第 7 条） | 进入阶段 4 / 6 |
 | **D-4** | `Place` / `Trip` / `TripItem` / `ChatSession` / `Message` / `MemoryItem` 表与对应 service | 阶段 4（Memory）/ 阶段 6（地图相册）才需要；阶段 3 只用 `Photo` / `Document` / `ToolCallLog` | 阶段 4 / 6 |
-| **D-5** | 隐私 / 语义 / ZK / 链相关（含 `privacy/`、`zk/`、`data/semantic_tags.yaml` 的接入） | 阶段 7，flag 全关；`Makefile` 里的 `semantic-batch` / `anchor-batch` / `exp-*` 同样不动 | 阶段 7 |
+| **D-5** | 隐私 / 语义 / ZK / 链相关（含 `privacy/`、`zk/`、`data/semantic_tags.yaml` 的接入） | 阶段 7，flag 全关；`Makefile` 里的 `semantic-batch` / `anchor-batch` / `exp-*` 同样不动（阶段 16 已删除这些指向空模块的 target） | 阶段 7 |
 | **D-6** | 检索阈值/权重调优（`retrieval_min_score`、融合权重） | **除非**阶段 3 出口条件判定为退化，否则属于"效果调优"，不在排错范围 | `make eval-ablation` 显示 Recall@5 相对阶段 2 下降时 |
 | **D-7** | 代码风格类：命名统一、日志格式统一、类型注解补全、目录微调、历史注释润色 | 判定标准第 4 问 → 只是风格 | 无（除非 CI 首次接入 lint 规则） |
 | **D-8** | 修复 Docker / WSL 被安全策略拦截 | **不在代码仓库范围**，属环境问题 | 用户自行解决环境 |

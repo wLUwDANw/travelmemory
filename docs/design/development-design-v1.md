@@ -5,6 +5,11 @@
 > 前置：[产品定义 v2](./product-v2-local-first.md)、[产品优化提案](./product-optimization.md)。
 > 现有资产：`travelmemory`（阶段 0~7 已完成，359 测试）、`trailshare`（v2026.5，230 测试）。
 
+> **阶段 16 变更（2026-11-20）**：`app/agent/thin.py` 与 `app/privacy/receipt.py` 已删除 ——
+> 它们从未挂任何 HTTP 路由，属于「写完但没接线」的代码。本文与
+> `product-v2-local-first.md` 中标注「已实现」的这两项，请读作「曾实现，已删除」；
+> 设计本身仍可作为阶段 17+ 的参考，但**不要以为它们在运行**。
+
 ---
 
 ## 1. 一页纸
@@ -26,8 +31,8 @@
 | --- | --- | --- |
 | RAG 问答 + 引用 + 拒答 | `app/agent/pipeline.py` | 已实现，359 测试 |
 | 混合检索 / 重排 / 记忆 / 评测 / 看板 | `app/agent/*` | 已实现 |
-| 数据小票（三档不变量） | `app/privacy/receipt.py` | **已实现，15 测试** |
-| L1 无状态生成 | `app/agent/thin.py` | **已实现，8 测试** |
+| 数据小票（三档不变量） | `app/privacy/receipt.py` | 曾实现 15 测试；**阶段 16 已删除（未接线）** |
+| L1 无状态生成 | `app/agent/thin.py` | 曾实现 8 测试；**阶段 16 已删除（未接线）** |
 | 加密信物 / 定向分享 / 承诺 / 签名 | `trailshare` | 已实现，230 测试 |
 | 信物推荐 + 反事实忠实度 | `trailshare` E1~E4 | 已实现（E2=0.833） |
 | 前端壳 / 地图 / 导入 | `frontend/` | 已实现（阶段 6） |
@@ -361,8 +366,8 @@ backend/app/
       __init__.py
       registry.py            # Specialist 定义与注册表（新增）
       prompts.py             # 专员 prompt 加载与版本（新增）
-    thin.py                  # L1（已实现）
-  privacy/receipt.py         # 小票（已实现）
+    thin.py                  # L1（阶段 16 已删除，未接线）
+  privacy/receipt.py         # 小票（阶段 16 已删除，未接线）
   api/v1/
     agent.py                 # 加 /answer-with-context（改）
     vault.py                 # sync / delete（新增）

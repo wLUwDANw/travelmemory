@@ -29,8 +29,8 @@ export interface MapPointInput {
   lng: number;
   /** 承诺半径（米）。**不是**本次实际偏移量 —— 后端 `ObfuscatedPoint.radius`。 */
   radius?: number;
-  /** 来源分组：分享信物解出的地点 / 本机照片。图层开关按它分组。 */
-  source: 'share' | 'photo';
+  /** 来源分组：信物解出的地点 / 本机照片 / 朋友导回主应用的行程。图层开关按它分组。 */
+  source: 'share' | 'photo' | 'friend';
   /** 展示名（Tooltip / 无障碍标签用）。 */
   name?: string;
 }
@@ -43,7 +43,7 @@ export interface CircleItem {
   center: LngLat;
   /** 承诺半径（米）。 */
   radius: number;
-  source: 'share' | 'photo';
+  source: 'share' | 'photo' | 'friend';
   name?: string;
 }
 
@@ -53,19 +53,29 @@ export interface MarkerItem {
   id: string;
   /** GCJ-02 位置（已转换）。 */
   position: LngLat;
-  source: 'share' | 'photo';
+  source: 'share' | 'photo' | 'friend';
   name?: string;
 }
 
 export type RenderItem = CircleItem | MarkerItem;
 
-/** 图层可见性。分享层默认开；照片层默认开（都没有时不显示空地图）。 */
+/** 图层可见性。
+ *
+ *  `share` / `photo` 默认开（都是"我的"数据）；
+ *  `friend` **默认关**：朋友的点画上来容易被误认成自己去过的地方，
+ *  必须由用户在地图抽屉里显式打开（W15-5 的开关，阶段 17 接通）。
+ */
 export interface LayerVisibility {
   share: boolean;
   photo: boolean;
+  friend: boolean;
 }
 
-export const DEFAULT_LAYER_VISIBILITY: LayerVisibility = { share: true, photo: true };
+export const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
+  share: true,
+  photo: true,
+  friend: false,
+};
 
 /** 视野包围盒（GCJ-02）。空输入时为 `null` —— 调用方应保持地图不动，
  *  而不是 fitBounds 到全世界（那是"初始视野丢了"的经典事故）。 */

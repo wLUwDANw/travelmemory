@@ -153,7 +153,7 @@ def stage3_off(monkeypatch) -> dict[str, bool]:
 
 @pytest.fixture
 def stage6_off(monkeypatch) -> dict[str, bool]:
-    """把阶段 6 四个开关**显式**关成 false，并清空 `AMAP_API_KEY`。
+    """把阶段 6 已接线的开关**显式**关成 false，并清空 `AMAP_API_KEY`。
 
     显式关 false 的理由同 `stage3_off`：本守护回答的是"开关关着时行为等不等同阶段 5"，
     **默认值是多少**由 `test_stage6_flags_default_to_disabled` 单独断言。
@@ -316,7 +316,7 @@ async def test_disabled_cache_does_not_change_output(store, user_id, stage3_off,
 def test_stage6_premise_is_all_flags_off(stage6_off):
     """阶段 6 守护的前提也必须先被断言：四开关全关 + 没有高德 key 可依赖。"""
     assert stage6_off == dict.fromkeys(STAGE6_FLAG_NAMES, False)
-    assert stage6_all_disabled() is True, "阶段 6 四个开关必须全部关闭"
+    assert stage6_all_disabled() is True, "阶段 6 已接线的开关必须全部关闭"
     assert get_settings().amap_api_key == "", "没配高德 key 时地图能力必须走 mock"
 
 

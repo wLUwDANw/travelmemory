@@ -228,6 +228,19 @@ describe('planJourneyImport —— 展开', () => {
   });
 });
 
+describe('planJourneyImport —— 行程起始日', () => {
+  it('取 days[0].date 作为 startedOn', () => {
+    expect(planJourneyImport(fivePhotos()).startedOn).toBe('2026-04-18');
+  });
+
+  it('日期畸形时宁可没有，也不猜', () => {
+    const journey = rawJourney([
+      { date: '10/04/2025', places: [{ name: '某地', photos: [{ id: 'a', thumbnailDataUrl: thumb() }] }] },
+    ]);
+    expect(planJourneyImport(journey).startedOn).toBeUndefined();
+  });
+});
+
 describe('planJourneyImport —— 缩略图合规性', () => {
   it('非 data URL 被丢掉并计数', () => {
     const plan = planJourneyImport({
@@ -314,7 +327,7 @@ describe('文件名清洗', () => {
 });
 
 describe('importJourneyToMain —— 调用顺序与参数', () => {
-  it('先逐张上传 → 建行程 → 按顺序挂照片 → 只有带坐标的补标', async () => {
+  it('先逐张上传 → 建行程 → 补坐标 → 再挂照片（顺序影响 trip_item 快照）', async () => {
     const calls: string[] = [];
     const seq = ['photo-1', 'photo-2', 'photo-3', 'photo-4', 'photo-5'];
 
@@ -323,8 +336,11 @@ describe('importJourneyToMain —— 调用顺序与参数', () => {
       calls.push(`import:${files[0].name}:${files[0].type}`);
       return importResult([seq[calls.filter((c) => c.startsWith('import:')).length - 1]]);
     };
-    const createTripFake = async (title: string): Promise<TripView> => {
-      calls.push(`createTrip:${title}`);
+    const createTripFake = async (
+      title: string,
+      options?: { startedOn?: string },
+    ): Promise<TripView> => {
+      calls.push(`createTrip:${title}:${options?.startedOn ?? '-'}`);
       return tripView('trip-9');
     };
     const assignFake = async (tripId: string, photoIds: readonly string[]): Promise<TripView> => {
@@ -350,10 +366,12 @@ describe('importJourneyToMain —— 调用顺序与参数', () => {
       'import:studio-3-c.jpg:image/jpeg',
       'import:studio-4-d.jpg:image/jpeg',
       'import:studio-5-e.jpg:image/jpeg',
-      'createTrip:洛阳两日',
-      'assign:trip-9:photo-1,photo-2,photo-3,photo-4,photo-5',
-      // 只有第 3 张带坐标，且补标发生在挂照片之后
+      // 行程起始日来自 `days[0].date`（阶段 16 P1 修复）
+      'createTrip:洛阳两日:2026-04-18',
+      // **补标发生在挂照片之前**：`assign_photos_to_trip` 会把 photo.lat/lng
+      // 快照进 trip_item，反序会让这 5 张里唯一带坐标的那张在地图上变成"未定位"。
       'patch:photo-3:34.6,112.4',
+      'assign:trip-9:photo-1,photo-2,photo-3,photo-4,photo-5',
     ]);
   });
 

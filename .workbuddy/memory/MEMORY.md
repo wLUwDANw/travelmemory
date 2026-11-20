@@ -35,6 +35,27 @@
 | 5 评估与可观测 | ✅ 已封板 | 0007（`faithfulness`） |
 | 6 地图相册 + 跨端 + 隐私分享 | ✅ 已交付（真机验证待人工） | — |
 | 7 语义抽象 + 群体推荐 + 可验证断言 | ✅ 已收口（提交 `b970dad`） | — |
+| 8 多 Agent 引用审计 | ⛔ 已关闭（提案，非产品路径） | — |
+| 9 轨迹回放 | ✅ 已交付 | — |
+| 10–15 双入口 / 双主题 / 分享链路 | ✅ 已交付（多项待人工验证） | — |
+| 16 门禁与真相 | ✅ 本机验证（CI 首跑待推送） | **0009**（删 `photo.thumb_url`） |
+
+## 阶段 16 要点（门禁与真相）
+
+- 守卫：`tests/test_layering.py` 覆盖 tools/services/models/**schemas**/**agent**；
+  `schemas` 不得 import `services`（常量放 `app/schemas/policy.py`）
+- 前端边界：`tools/check-import-boundaries.mjs` —— apps 不 import frontend、packages 不 import 宿主、
+  跨包 import 必须在 package.json 声明、GCJ-02 常数只能在 `packages/geo` 与 `utils/coords.py`
+- 语义标签：唯一源仍是 `app/utils/semantic_tags.py`，跑 `tools/gen_semantic_tags.py` 生成两份 TS；
+  `make guards` / CI 用 `--check` 抓漏跑。`semantic_tags.yaml` 已删
+- 运行时：`AGENT_RUNTIME` 默认 **graph**；重试次数唯一来源 `Settings.agent_generate_retries`；
+  两套编排的完整事件序列与重试次数由 `test_graph_runtime.py` 钉死
+- 导回：`POST /trips` 接受 `started_on`（当地日期）；`assign_photos_to_trip` 不用 None 覆盖已知日期；
+  前端补坐标必须在 `assignTripPhotos` **之前**
+- 文档：`docs/stages/README.md` 四态（已验证 / 未验证 / 未开始 / 已关闭），
+  `tools/check_stage_index.py` 校验；`docs/` 的「完成」不再等于「验证过」
+- 已删除：`showcase/`、`agent/thin.py` + `privacy/receipt.py`（481 行，从未接线）、
+  `SessionStore`、4 个死 flag、6 个死配置
 
 ## 阶段 7 要点（W7-1 ~ W7-3）
 
@@ -51,8 +72,9 @@
   非法标签静默丢弃，全丢光 → **422**
 - W7-3：颜色是密码学语义 —— 绿=证实 / 红=证伪 / 灰=未证实。
   **链未锚定是灰色不是红色**（没拿到证伪证据就不能涂红）
-- 改词表必须同步升 `SEMANTIC_TAG_VERSION`，并同步 `core/config.py::semantic_tag_version`
-  与 `app/data/semantic_tags.yaml`（当前 `sem-2026.2`）
+- 改词表必须同步升 `SEMANTIC_TAG_VERSION`，然后跑 `python tools/gen_semantic_tags.py`
+  重新生成两份前端常量（当前 `sem-2026.2`）。阶段 16 起**不再有** `core/config.py::semantic_tag_version`
+  与 `app/data/semantic_tags.yaml` —— 那两处是已删除的第二、第三真相源
 - `POST /api/v1/trips` 建的是 `source=manual` 的空行程；**重建只删 cluster 的行**，
   用户输入不能被派生数据的重建冲掉
 

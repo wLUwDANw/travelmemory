@@ -2,7 +2,7 @@
 
 设计要点（设计文档 §4）：
   - 原图永不上云：库里只存 `platform + asset_id`，展示时通过系统 API 重新取；
-    落盘的只有**本地生成的缩略图**（`local_thumb_path` / `thumb_url`）
+    落盘的只有**本地生成的缩略图**（`local_thumb_path`）
   - `unique(platform, asset_id)` 做去重：同一张照片重复导入不会产生两条记录
   - `ai_status` / `ai_model` 记录 caption 与 ai_tags 的生成状态，
     离线批处理（阶段 1 W1-2）靠它挑"还有哪些照片没处理过"
@@ -52,8 +52,8 @@ class Photo(Base):
     hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
     # ---- 缩略图（原图不入库、不上云）----
+    #: 本地生成的缩略图路径。`thumb_url` 已在阶段 16 删除（从未写入过的对象存储占位）。
     local_thumb_path: Mapped[str | None] = mapped_column(Text)
-    thumb_url: Mapped[str | None] = mapped_column(Text)
 
     # ---- 位置 ----
     lat: Mapped[float | None] = mapped_column(Float)

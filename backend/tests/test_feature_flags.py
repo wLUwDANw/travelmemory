@@ -40,8 +40,8 @@ def test_all_default_flags_are_disabled():
 def test_flag_names_cover_stage3_stage6_and_stage7():
     """三个分组不重不漏 —— 防止后来加开关时只加进一半。"""
     assert set(STAGE3_FLAG_NAMES) == {"tools", "cache", "rerank", "hnsw"}
-    assert set(STAGE6_FLAG_NAMES) == {"photo_import", "map_album", "native_bridge", "privacy"}
-    assert set(STAGE7_FLAG_NAMES) == {"semantic", "zk", "chain"}
+    assert set(STAGE6_FLAG_NAMES) == {"photo_import", "privacy"}
+    assert set(STAGE7_FLAG_NAMES) == {"semantic"}
 
     grouped = [STAGE3_FLAG_NAMES, STAGE6_FLAG_NAMES, STAGE7_FLAG_NAMES]
     union: set[str] = set()
@@ -55,8 +55,12 @@ def test_flag_names_cover_stage3_stage6_and_stage7():
             assert set(left) & set(right) == set(), "分组之间不许重叠"
 
 
-def test_stage6_flags_helper_only_returns_four():
-    """阶段 6 的辅助函数只吐四个开关 —— 多一个少一个都会让退化前提失真。"""
+def test_stage6_flags_helper_only_returns_wired_flags():
+    """阶段 6 的辅助函数只吐**实际接线**的开关 —— 多一个少一个都会让退化前提失真。
+
+    阶段 16 之前这里断言「四个」，其中 `map_album` / `native_bridge` 从未被任何
+    代码读取。把它们删掉不是减少覆盖，而是让这个断言描述真实的接线面。
+    """
     settings = clean_settings()
     assert stage6_flags(settings) == dict.fromkeys(STAGE6_FLAG_NAMES, False)
     assert stage6_all_disabled(settings) is True

@@ -15,16 +15,25 @@ agent 工具引用。放在任一个 service 里都会让另一个反向依赖�
 2. **可审计**：规则表能直接读、能单测、能手工改一个词；LLM 的分类边界不可见。
 3. **零成本**：语义抽取发生在导入链路里，每条照片/地点都调一次 LLM 是不可接受的。
 
-## 平票时按 `SEMANTIC_TAGS` 顺序取
+## 平票的两级裁决（阶段 16 统一）
+
+票数相同时，先比**该类的命中词长度**（越长越具体），长度也相同才按
+`SEMANTIC_TAGS` 顺序。第二级是契约：
 
 `SEMANTIC_TAGS` 的**顺序本身就是契约**：它与前端 `src/types/share.ts` 的 `ALL_TAGS`
 逐项一致，而 `ALL_TAGS` 是 TrailShare 规范里"评分打平时谁在前面"的依据。
 改顺序会让两端的推荐结果分叉，**只能追加，不能重排**。
+
+第一级的存在理由见 `平江路` 的例子：单字"江"让 nature 与 watertown 各得一票，
+但"平江路"这个整名更长、更具体，必须压过单字。阶段 16 之前这条规则只写在
+`services/semantic_service.py` 里，而本模块的 `classify_semantic_tag` 用的是
+纯顺序裁决 —— 同一个概念两套算法。现在只有 `match_semantic_tag` 一份实现。
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 #: 六类语义标签。**顺序即平票排序依据**，与前端 `ALL_TAGS` 一致，禁止重排。
 SEMANTIC_TAGS: tuple[str, ...] = (
@@ -132,25 +141,95 @@ def is_semantic_tag(value: str | None) -> bool:
     return isinstance(value, str) and value in SEMANTIC_TAGS
 
 
+@dataclass(frozen=True)
+class SemanticTagMatch:
+    """一次语义匹配的完整结果：胜出标签 + 票数 + 逐类证据。
+
+    为什么不是只返回 `tag`：调用方还需要 `confidence`（胜出票数 / 参与投票的段数）
+    与 `matched`（哪几个输入片段触发了它）。让调用方拿 `tag` 再自己算一遍，
+    就是第二套算法 —— 阶段 16 之前正是这么分叉的。
+    """
+
+    tag: str | None
+    scores: dict[str, int]
+    longest: dict[str, int]
+    matched: dict[str, tuple[str, ...]]
+    segment_count: int
+
+
+def _segments(
+    poi_type: str | None,
+    ai_tags: Sequence[str] | None,
+    name: str | None,
+) -> list[str]:
+    """展开"参与投票的输入段"：`poi_type` 与 `name` 各一段，`ai_tags` **每项**各一段。
+
+    `ai_tags` 逐项而不是拼成一个大字符串：拼串会让"命中了三类"和"某一类命中三次"
+    无法区分，而前者才是有信息量的证据。
+    """
+    segments: list[str] = [item for item in (poi_type, name) if item]
+    segments.extend(item for item in (ai_tags or ()) if item)
+    return segments
+
+
+def match_semantic_tag(
+    *,
+    poi_type: str | None = None,
+    ai_tags: Sequence[str] | None = None,
+    name: str | None = None,
+) -> SemanticTagMatch:
+    """六类标签的**唯一匹配实现**：投票 → 平票两级裁决。
+
+    一段文本对同一类最多投 1 票（否则"山山山"这种噪声会把自己刷成 nature）。
+    平票时先比命中词长度、再比 `SEMANTIC_TAGS` 顺序 —— 详见模块 docstring。
+    全部无命中时 `tag=None` 且 `scores={}`：调用方决定隐藏语义条还是重试，
+    本函数不做兜底猜测（猜错的语义会污染群体模式库）。
+    """
+    segments = _segments(poi_type, ai_tags, name)
+    scores: dict[str, int] = {}
+    longest: dict[str, int] = {}
+    matched: dict[str, list[str]] = {}
+
+    for segment in segments:
+        haystack = segment.lower()
+        for tag, keywords in TAG_KEYWORDS.items():
+            hit = max((keyword for keyword in keywords if keyword in haystack), key=len, default="")
+            if not hit:
+                continue
+            scores[tag] = scores.get(tag, 0) + 1
+            longest[tag] = max(longest.get(tag, 0), len(hit))
+            matched.setdefault(tag, []).append(segment)
+
+    if not scores:
+        return SemanticTagMatch(None, {}, {}, {}, len(segments))
+
+    top = max(scores.values())
+    tied = [tag for tag in SEMANTIC_TAGS if scores.get(tag, 0) == top]
+    winner = max(tied, key=lambda tag: (longest.get(tag, 0), -SEMANTIC_TAGS.index(tag)))
+    return SemanticTagMatch(
+        tag=winner,
+        scores=scores,
+        longest=longest,
+        matched={tag: tuple(items) for tag, items in matched.items()},
+        segment_count=len(segments),
+    )
+
+
 def score_semantic_tags(*texts: str | None) -> dict[str, int]:
     """对若干段文本投票，返回每类的命中数（未命中的类不出现在字典里）。
 
-    大小写不敏感（中英混排的 POI 名里英文很常见），同一个词在同一段文本里
-    重复出现只算一次 —— 否则"山山山"这种噪声文本会把它自己刷成 nature。
+    保留这个入口是为了让"只想看票数"的调用方不必构造 `ai_tags` 列表；
+    它内部走的是同一个 `match_semantic_tag`，不存在第二套计票逻辑。
     """
-    scores: dict[str, int] = {}
-    for raw in texts:
-        if not raw:
-            continue
-        haystack = raw.lower()
-        for tag, keywords in TAG_KEYWORDS.items():
-            if any(keyword in haystack for keyword in keywords):
-                scores[tag] = scores.get(tag, 0) + 1
-    return scores
+    return match_semantic_tag(ai_tags=[text for text in texts if text]).scores
 
 
 def pick_semantic_tag(scores: dict[str, int]) -> str | None:
-    """按票数取标签；**平票按 `SEMANTIC_TAGS` 顺序**，保证跨设备一致。"""
+    """只有票数、没有证据长度时的降级裁决：**平票按 `SEMANTIC_TAGS` 顺序**。
+
+    正常路径应该用 `match_semantic_tag`（它能比"命中词有多具体"）。
+    这个函数留给"手上只有一份票数统计"的调用方，语义与旧版一致。
+    """
     if not scores:
         return None
     best_tag = None
@@ -168,20 +247,10 @@ def classify_semantic_tag(
     ai_tags: Sequence[str] | None = None,
     name: str | None = None,
 ) -> str | None:
-    """把具体的 `poi_type` / `ai_tags` / 地点名映射到六类语义标签。
+    """把 `poi_type` / `ai_tags` / 地点名映射到六类语义标签（只要标签、不要证据）。
 
-    三类输入**等权**各计一票（不加权的原因：权重从哪来没有依据，拍脑袋的权重
-    只会让"为什么这个石窟被分到 nature"变得更难解释）。全部无命中返回 `None` ——
-    调用方决定是隐藏语义条还是退回默认，**本函数不做兜底猜测**：猜错的语义序列
-    会污染整个群体模式库，而"没有语义"只是少一条数据。
+    三类输入**等权**各计一票（不加权：权重从哪来没有依据，拍脑袋的权重只会让
+    "为什么这个石窟被分到 nature"更难解释）。全部无命中返回 `None`。
+    需要 `confidence` / `matched` 时用 `match_semantic_tag`。
     """
-    scores = score_semantic_tags(poi_type, name)
-    for tag_value in ai_tags or ():
-        if not tag_value:
-            continue
-        # ai_tags 是列表：逐项各投一票，比拼成一个大字符串更能体现"命中了几类"
-        for tag, keywords in TAG_KEYWORDS.items():
-            haystack = tag_value.lower()
-            if any(keyword in haystack for keyword in keywords):
-                scores[tag] = scores.get(tag, 0) + 1
-    return pick_semantic_tag(scores)
+    return match_semantic_tag(poi_type=poi_type, ai_tags=ai_tags, name=name).tag

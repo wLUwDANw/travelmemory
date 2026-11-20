@@ -22,10 +22,17 @@ import pytest
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 #: 被守卫的包： → 禁止依赖的上层模块
+#:
+#: 阶段 16 补了 `schemas` 与 `agent` 两条：之前只守 tools/services/models，
+#: 于是 `schemas/semantic.py → services/semantic_trajectory` 这条反向依赖
+#: 在 15 个阶段里一直存在却从未被拦下。守卫的价值取决于它覆盖到哪，
+#: 只守"已经守住的三个方向"等于没守。
 LAYERING_RULES = (
     ("app/tools", ("app.agent", "app.api")),
     ("app/services", ("app.agent", "app.api")),
     ("app/models", ("app.agent", "app.api", "app.tools", "app.services")),
+    ("app/schemas", ("app.agent", "app.api", "app.tools", "app.services")),
+    ("app/agent", ("app.api",)),
 )
 
 #: 允许直接读环境变量的模块（`os.getenv` 的唯一入口）

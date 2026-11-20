@@ -1,9 +1,9 @@
 {
   "name": "travel-memory-frontend",
   "private": true,
-  "version": "0.0.0-stage2",
+  "version": "0.16.0",
   "type": "module",
-  "description": "旅忆地图 TravelMemory 前端（阶段 2：Agent 对话页骨架）",
+  "description": "旅忆地图 TravelMemory 前端（阶段 16：地图相册底座 + 双入口）",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -151,13 +151,19 @@ class LangGraphAgent:
         max_context_chars: int = 4000,
         settings: Settings | None = None,
         memory: MemoryService | None = None,
-        max_generate_retries: int = MAX_GENERATE_RETRIES,
+        max_generate_retries: int | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
         self.retriever = retriever
         self.memory = memory
-        self.max_generate_retries = max_generate_retries
+        # 阶段 16：默认值从 Settings 取，与 `AgentPipeline` 共用同一个数字。
+        # 传 None 而不是把 `settings` 写进默认参数（默认参数在 import 时求值）。
+        self.max_generate_retries = (
+            self.settings.agent_generate_retries
+            if max_generate_retries is None
+            else max_generate_retries
+        )
         self.rewrite = RewriteNode(llm)
         self.query_parse = QueryParseNode(llm)
         self.retrieve = RetrieveNode(retriever)

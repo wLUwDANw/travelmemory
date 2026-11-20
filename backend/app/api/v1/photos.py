@@ -55,7 +55,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import ValidationError
 
-from app.core.feature_flags import is_enabled
+from app.api.deps import ensure_flag
 from app.db.session import SessionFactory
 from app.models.photo import Photo
 from app.schemas.trip import (
@@ -153,8 +153,7 @@ async def import_photos(
     行程现在是用户手动组建的视图，导入这一步不产生任何行程。
     """
     # 开关未开 = 能力不存在（404，不是 403）。详见模块 docstring。
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     payloads = [await upload.read() for upload in files]
 
@@ -197,8 +196,7 @@ async def list_photos(
     用户可能是从微信存的图，元数据全被剥掉了。排末尾 + 允许补标，
     比直接藏起来更尊重用户的照片。
     """
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     async with SessionFactory() as session:
         user = await get_or_create_demo_user(session)
@@ -233,8 +231,7 @@ async def patch_photo_location(photo_id: str, body: dict) -> PhotoListItem:
     一个畸形 id 既可能是用户手滑，也可能是有人在枚举接口 ——
     两种情况下"不存在"都是最诚实也最安全的回答。
     """
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     try:
         payload = PhotoLocationUpdate.model_validate(body)

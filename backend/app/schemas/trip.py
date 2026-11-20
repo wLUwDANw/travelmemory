@@ -28,7 +28,7 @@ FastAPI 也能被 JSON 编码，但编码出来的格式依赖 pydantic 版本�
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -240,6 +240,15 @@ class TripCreateRequest(BaseModel):
         min_length=1,
         max_length=128,
         description="行程标题，如「洛阳两日」。首尾空白会被剥掉，剥完为空则 422",
+    )
+    #: 行程起始日（**当地日期**，不是时间戳）。
+    #:
+    #: 只在"从 journey 包导回"时使用：包里的 `days[0].date` 是事实，
+    #: 而缩略图没有 EXIF，后端无法从照片反推。手工新建时传 None 即可 ——
+    #: 不传和传 null 都表示"还不知道"，不会填 now()。
+    started_on: date | None = Field(
+        default=None,
+        description="行程起始日（YYYY-MM-DD，当地日期）；未知则不传",
     )
 
 

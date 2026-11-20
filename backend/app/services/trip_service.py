@@ -38,7 +38,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -149,6 +149,7 @@ async def create_manual_trip(
     *,
     user_id: uuid.UUID,
     title: str,
+    started_on: date | None = None,
 ) -> Trip:
     """手工创建一个**空**行程（`source = manual`）。
 
@@ -163,12 +164,21 @@ async def create_manual_trip(
     又会突然跳到别的一天 —— 凭空多出一次"日期自己变了"的困惑。
     `null` 的语义是"还不知道"，这是唯一诚实的取值。
 
+    `started_on` 是唯一的例外：从 journey 包导回时，包里的 `days[0].date`
+    是**事实**而不是用户臆造的值，且缩略图没有 EXIF 可供反推。它按"当地日期
+    的 00:00（UTC）"落库，只用于列表显示；照片一旦带上真实 `taken_at`，
+    `assign_photos_to_trip` 会用照片的最早时间覆盖它。
+
     调用方负责提交事务（与 `import_photos` 的"显式管提交边界"同一套做法）。
     """
     trip = Trip(
         user_id=user_id,
         title=title,
-        started_at=None,
+        started_at=(
+            datetime.combine(started_on, time.min, tzinfo=UTC)
+            if started_on is not None
+            else None
+        ),
         ended_at=None,
         source=TRIP_SOURCE_MANUAL,
     )
@@ -382,8 +392,15 @@ async def assign_photos_to_trip(
         )
 
     trip.source = TRIP_SOURCE_MANUAL
-    trip.started_at = _earliest(photos)
-    trip.ended_at = _latest(photos)
+    # **不要用 None 覆盖已知日期**：导入的缩略图没有 EXIF，`_earliest(photos)`
+    # 恒为 None；如果无条件赋值，`create_manual_trip(started_on=...)` 刚写进去的
+    # 行程日期会被紧接着的挂照片动作抹掉 —— 这正是阶段 15 那条 P1 的另一半。
+    earliest = _earliest(photos)
+    latest = _latest(photos)
+    if earliest is not None:
+        trip.started_at = earliest
+    if latest is not None:
+        trip.ended_at = latest
     await session.flush()
     return trip
 

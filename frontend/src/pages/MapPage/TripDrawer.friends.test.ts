@@ -13,7 +13,7 @@
  *  ① 默认「我的」里**看不到**朋友发来的行程（否则等于没分类，而且还容易误删）；
  *  ② 切到「朋友的」能看到发件人文件夹，展开后能认出"哪一趟、几张照片"；
  *  ③ 没有朋友行程时的空态要给**下一步动作**（让发送方点"接受并导回"）；
- *  ④ 地图叠加开关必须是 disabled + 写明"待阶段16"（不能假装能用）。
+ *  ④ 地图叠加开关默认关闭，但必须可切换（阶段 17 接通）。
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -126,17 +126,25 @@ describe('行程分类：我的 / 朋友的（W15-5）', () => {
     expect(screen.getByText(/接受并导回/)).toBeTruthy();
   });
 
-  it('「在地图上显示朋友的分享」是 disabled 的，并写明待阶段16', async () => {
+  it('「在地图上显示朋友的分享」默认关闭，但可以打开', async () => {
     renderPage([friendTrip()]);
     await openTrips();
     switchToFriends();
 
     const checkbox = screen.getByRole('checkbox', { name: '在地图上显示朋友的分享' }) as HTMLElement;
     expect(checkbox).toBeTruthy();
-    // Radix 的 Checkbox 渲染成 button[role=checkbox]，disabled 时带原生 disabled + data-disabled
-    expect(checkbox.hasAttribute('disabled')).toBe(true);
-    expect(checkbox.getAttribute('data-disabled')).not.toBeNull();
-    expect(screen.getByText('（地图叠加待阶段16）')).toBeTruthy();
-    expect(checkbox.getAttribute('title')).toContain('阶段 16');
+    // 阶段 17 起它是真开关：默认关，但不 disabled
+    expect(checkbox.hasAttribute('disabled')).toBe(false);
+    expect(checkbox.getAttribute('data-state')).toBe('unchecked');
+
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.getAttribute('data-state')).toBe('checked'));
+
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.getAttribute('data-state')).toBe('unchecked'));
+
+    // 文案不再承诺"阶段 16"，而是解释默认关闭的原因
+    expect(screen.queryByText(/待阶段\s*16/)).toBeNull();
+    expect(screen.getByText(/不会和你的照片混在一起/)).toBeTruthy();
   });
 });

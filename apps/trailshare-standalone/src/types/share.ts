@@ -19,30 +19,23 @@
 // 3.1 标签与强度
 // ---------------------------------------------------------------------------
 
-export type Tag = 'heritage' | 'nature' | 'watertown' | 'metropolis' | 'food' | 'leisure';
+import {
+  SEMANTIC_TAGS,
+  SEMANTIC_TAG_LABELS,
+  type SemanticTag,
+} from '../generated/semanticTags';
+
+/** 六类标签。类型与常量都由 `src/generated/semanticTags.ts` 派生（阶段 16）。 */
+export type Tag = SemanticTag;
 export type IntensityBucket = 'low' | 'mid' | 'high';
 
 /** 平票时的稳定排序依据。
  *
  * 这个数组的**顺序本身就是协议的一部分**：`recommend()` 在分数相同时按它取先后，
  * 换个顺序就会让"两个标签打平时推荐哪个"在两端不一致。所以只能追加，不能重排。 */
-export const ALL_TAGS: readonly Tag[] = [
-  'heritage',
-  'nature',
-  'watertown',
-  'metropolis',
-  'food',
-  'leisure',
-];
+export const ALL_TAGS: readonly Tag[] = SEMANTIC_TAGS;
 
-export const TAG_LABELS: Record<Tag, string> = {
-  heritage: '人文历史',
-  nature: '自然风光',
-  watertown: '水乡古镇',
-  metropolis: '都市风光',
-  food: '美食探索',
-  leisure: '休闲度假',
-};
+export const TAG_LABELS: Record<Tag, string> = SEMANTIC_TAG_LABELS;
 
 export const INTENSITY_STARS: Record<IntensityBucket, string> = {
   low: '★',

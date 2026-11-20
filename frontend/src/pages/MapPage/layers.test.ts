@@ -91,9 +91,20 @@ describe('planMapRender：图层开关与视野', () => {
     const plan = planMapRender([TIANANMEN, { id: 'ph', lat: 39.9, lng: 116.4, source: 'photo' }], {
       share: false,
       photo: true,
+      friend: false,
     });
     expect(plan.items.map((i) => i.id)).toEqual(['ph']);
     expect(plan.hidden).toBe(1);
+  });
+
+  it('朋友的分享默认不进计划（必须显式打开）', () => {
+    const friendPoint = { id: 'f1', lat: 39.9, lng: 116.4, source: 'friend' as const };
+    const off = planMapRender([friendPoint]);
+    expect(off.items).toHaveLength(0);
+    expect(off.hidden).toBe(1);
+
+    const on = planMapRender([friendPoint], { share: true, photo: true, friend: true });
+    expect(on.items.map((i) => i.id)).toEqual(['f1']);
   });
 
   it('空计划 → bounds 为 null（调用方必须保持地图不动）', () => {
@@ -119,7 +130,7 @@ describe('planMapRender：图层开关与视野', () => {
 describe('辅助函数', () => {
   it('toggleLayer 只翻目标图层', () => {
     const next = toggleLayer(DEFAULT_LAYER_VISIBILITY, 'share');
-    expect(next).toEqual({ share: false, photo: true });
+    expect(next).toEqual({ share: false, photo: true, friend: false });
   });
 
   it('withoutItem 按 ID 移除', () => {

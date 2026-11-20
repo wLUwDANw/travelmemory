@@ -11,7 +11,7 @@ import asyncio
 
 import pytest
 
-from app.core.cache import TTL_SESSION_SEC, InMemoryCache, NullCache, SessionStore
+from app.core.cache import TTL_SESSION_SEC, InMemoryCache, NullCache
 from app.core.exceptions import LLMBudgetExceeded
 from app.core.llm import BudgetGuard
 
@@ -74,30 +74,3 @@ def test_budget_key_is_per_day() -> None:
     today = __import__("datetime").datetime.now(__import__("datetime").UTC).strftime("%Y-%m-%d")
     assert today in key
     assert TTL_SESSION_SEC <= 48 * 3600  # 会话 TTL 不该长过预算 key 的生命周期
-
-
-# ---------------------------------------------------------------- 会话态
-async def test_session_window_keeps_only_recent_messages() -> None:
-    """滑窗：只保留最近 N 条，最旧的自动丢弃（对话历史是无界的）。"""
-    store = SessionStore(InMemoryCache(), window=3)
-    for i in range(6):
-        await store.append("s1", {"role": "user", "content": f"第{i}句"})
-
-    recent = await store.recent("s1")
-    assert [m["content"] for m in recent] == ["第3句", "第4句", "第5句"]
-
-
-async def test_session_returns_in_chronological_order() -> None:
-    """`lpush` 存下来是"新的在前"，读出来必须是自然对话顺序（老的在前）。"""
-    store = SessionStore(InMemoryCache(), window=5)
-    await store.append("s1", {"content": "先说的"})
-    await store.append("s1", {"content": "后说的"})
-
-    assert [m["content"] for m in await store.recent("s1")] == ["先说的", "后说的"]
-
-
-async def test_session_read_failure_is_empty_not_error() -> None:
-    """会话态是旁路：读失败按空会话处理，不能让问答失败。"""
-    store = SessionStore(NullCache(), window=5)
-    await store.append("s1", {"content": "写不进去"})
-    assert await store.recent("s1") == []

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.core.feature_flags import is_enabled
+from app.api.deps import ensure_flag
 from app.privacy.obfuscate import PrivacyError, obfuscate_location
 from app.schemas.privacy import ObfuscateRequest, ObfuscateResponse
 
@@ -39,8 +39,7 @@ async def obfuscate(req: ObfuscateRequest) -> ObfuscateResponse:
     这是刻意的 —— 若对同一坐标总是返回同一个结果，外部就能通过重放校准出真实位置。
     """
     # 开关未开 = 能力不存在（404，不是 403）。详见模块 docstring。
-    if not is_enabled("privacy"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("privacy")
 
     try:
         point = obfuscate_location(

@@ -16,7 +16,7 @@
 行程是导入链路的产物：没有导入就没有照片，没有照片就没有行程。
 把 `GET /trips` 和 `POST /photos/import` 挂在同一个开关下，
 "这个闭环开没开"就只有一个答案，而不是两个开关各说各话。
-（`map_album` 开关留给前端地图相册的**展示**能力，本轮不接。）
+（地图相册是前端的**展示**能力，后端不设开关。）
 
 开关关闭时返回 **404**（能力不存在），理由与取舍写在 `api/v1/photos.py` 里。
 
@@ -35,7 +35,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, select
 
-from app.core.feature_flags import is_enabled
+from app.api.deps import ensure_flag
 from app.db.session import SessionFactory
 from app.models.trip import TripItem
 from app.schemas.trip import (
@@ -105,8 +105,7 @@ async def list_trips() -> TripListResponse:
     "还没有行程"是**数据状态**，不是"这个接口不存在"。
     """
     # 开关未开 = 能力不存在（404，不是 403）。详见模块 docstring。
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     async with SessionFactory() as session:
         user = await get_or_create_demo_user(session)
@@ -133,7 +132,7 @@ async def create_trip(req: TripCreateRequest) -> TripCreateResponse:
 
     ## 为什么手工行程不会被后续导入冲掉
 
-    `rebuild_user_trips()` 重建时**只删 `source == cluster` 的行**
+    即便将来重新接入自动整理，`rebuild_user_trips()` 重建时也**只删 `source == cluster` 的行**
     （见 `services/trip_service.py::_delete_user_trips` 的取舍说明）。
     用户敲下的标题是库里唯一的副本，删了就找不回来，所以这里守的是
     "派生数据可以让位，用户输入不行"这条线。
@@ -143,8 +142,7 @@ async def create_trip(req: TripCreateRequest) -> TripCreateResponse:
     纯空白标题落库后是一个**看起来为空**的行程卡片，用户会以为"创建没生效"。
     在入口剥掉并判空，比在渲染时再处理更早也更省事。
     """
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     title = req.title.strip()
     if not title:
@@ -153,7 +151,9 @@ async def create_trip(req: TripCreateRequest) -> TripCreateResponse:
 
     async with SessionFactory() as session:
         user = await get_or_create_demo_user(session)
-        trip = await create_manual_trip(session, user_id=user.id, title=title)
+        trip = await create_manual_trip(
+            session, user_id=user.id, title=title, started_on=req.started_on
+        )
         await session.commit()
 
     return TripCreateResponse(
@@ -187,8 +187,7 @@ async def rename_trip(trip_id: uuid.UUID, req: TripRenameRequest) -> TripCreateR
     见 `services/trip_service.py::rename_trip` 的取舍说明：不改 source 的话，
     下次导入照片触发的重建会把用户敲的标题冲掉。
     """
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     title = req.title.strip()
     if not title:
@@ -250,8 +249,7 @@ async def delete_trip(trip_id: uuid.UUID) -> None:
     找不到的与"不属于你"的对调用方是同一件事，都该让你删不了。
     用 403 会免费送一个枚举接口。
     """
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     async with SessionFactory() as session:
         user = await get_or_create_demo_user(session)
@@ -288,8 +286,7 @@ async def assign_trip_photos(trip_id: uuid.UUID, req: TripPhotosAssign) -> TripC
     让它退出 `rebuild_user_trips()` 的删除范围。代价是这趟不再随
     导入自动更新，收益是用户挑的结果不被冲掉。
     """
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     photo_ids: list[uuid.UUID] = []
     for raw in req.photo_ids:
@@ -340,8 +337,7 @@ async def remove_trip_photo(trip_id: uuid.UUID, photo_id: uuid.UUID) -> None:
     （边界由剩下的照片决定，下次保存时会重算）。为了一个
     下次就会被覆盖的中间值在这里多做一次全量扫描，不值得。
     """
-    if not is_enabled("photo_import"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("photo_import")
 
     async with SessionFactory() as session:
         user = await get_or_create_demo_user(session)

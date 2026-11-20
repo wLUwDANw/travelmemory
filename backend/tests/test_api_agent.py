@@ -29,7 +29,7 @@ def test_health_reports_current_stage() -> None:
     """健康检查刻意不查库，所以它能在任何环境下作为探针用。"""
     payload = TestClient(app).get("/health").json()
     assert payload["status"] == "ok"
-    assert payload["stage"] == 2
+    assert payload["stage"] == 16
     assert payload["prompt_version"]
 
 

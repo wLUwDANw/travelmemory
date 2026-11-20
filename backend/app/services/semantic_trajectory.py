@@ -59,21 +59,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
+from app.schemas.policy import K_ANONYMITY, MAX_SEQUENCE_STEPS
 from app.utils.semantic_tags import SEMANTIC_TAGS, is_semantic_tag
 
-#: **发布门禁**：`support < 5` 的模式一律不可见（设计文档 §9.2）。
-#:
-#: 为什么是 5 而不是 3 或 10：这是 k-匿名里 k 的取值，取小了匿名集不够、
-#: 取大了在"单用户起步"的产品早期永远出不了第一条推荐。5 是隐私效用与可用性
-#: 折中的常用量级，且与"一个人一天最多贡献几条序列"的直觉相符。
-K_ANONYMITY = 5
-
-#: **序列截断上限**：上报与查询都只保留最后 6 步（设计文档 §9.2）。
-#:
-#: 长序列是强指纹：六类标签里随机 20 步的组合空间是 6^20， practically 全球唯一；
-#: 截断到 6 步后同一模式会被大量行程命中。截断也顺带让"前缀"数量收敛，
-#: 否则 `support` 会随序列长度指数级稀释，什么都达不到门禁。
-MAX_SEQUENCE_STEPS = 6
+# `K_ANONYMITY` / `MAX_SEQUENCE_STEPS` 的真相源已上移到 `app/schemas/policy.py`：
+# schemas 需要它们做 `max_length` 与响应默认值，而 `schemas → services` 是反向依赖。
+# 这里保留 import + 同名符号，调用方（api / tests）无需改 import 路径。
 
 #: **评分过滤阈值**：平均分低于 4.0 的行程不贡献评分（设计文档 §9.2）。
 #:

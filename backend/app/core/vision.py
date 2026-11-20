@@ -79,7 +79,7 @@ class MockVision(BaseVision):
     足以验证"照片 → 文本 → 入库"这条链路是否通畅。
     """
 
-    #: 极简关键词 → 标签映射（正式版在阶段 7 换成 semantic_tags.yaml + LLM）
+    #: 极简关键词 → 标签映射（正式版在阶段 7 换成 semantic_tags.py 词表 + LLM（yaml 快照已于阶段 16 删除））
     _KEYWORD_TAGS = {
         "古镇": ["古镇", "水乡"],
         "乌镇": ["古镇", "水乡", "夜景"],

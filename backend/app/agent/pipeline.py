@@ -202,6 +202,13 @@ class AgentPipeline:
             yield parsed_event(state)
 
             await self.retrieve(state, trace)
+            # 记忆必须在 build_context **之前**装载：上下文区块的顺序是在那里定下来的，
+            # 之后再补就会出现"偏好被塞到证据后面"，模型会把它当成可引用材料。
+            #
+            # 阶段 16：这一步与 `graph.py` 的边顺序对齐（retrieve → load_memory →
+            # tool_call → build_context）。两套运行时的节点顺序不同，会让 trace 与
+            # 工具事件的位置对不上；"两个运行时等价"不能只靠一句注释。
+            await self._load_memory(state, trace)
             # 工具证据必须在 build_context 之前追加：上下文编号是在 build_context 里定的，
             # 之后再加就会出现"模型引用了不存在的 [n]"。
             if is_enabled("tools", self.settings):
@@ -209,9 +216,6 @@ class AgentPipeline:
             await self.tool_call(state, trace)
             if is_enabled("tools", self.settings):
                 yield tool_result_event(state)
-            # 记忆必须在 build_context **之前**装载：上下文区块的顺序是在那里定下来的，
-            # 之后再补就会出现"偏好被塞到证据后面"，模型会把它当成可引用材料。
-            await self._load_memory(state, trace)
 
             await self.build_context(state, trace)
             yield evidence_event(state)
@@ -226,8 +230,13 @@ class AgentPipeline:
                     yield {"type": "delta", "text": chunk}
 
                 violations = await self.self_check(state, trace)
-                # 最多重试一次生成：再给模型一次机会，仍不行就拒答
-                if violations and state.attempts == 0 and not state.refused:
+                # 最多重试 `agent_generate_retries` 次（默认 1）：再给模型一次机会，
+                # 仍不行就拒答。次数与 graph 共用同一个 Settings 字段。
+                if (
+                    violations
+                    and state.attempts < self.settings.agent_generate_retries
+                    and not state.refused
+                ):
                     logger.info("self_check 未通过，重试一次生成：%s", violations[:2])
                     state.attempts += 1
                     yield {"type": "restart", "payload": {"reason": "self_check_failed"}}

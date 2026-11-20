@@ -6,6 +6,12 @@
 
 ---
 
+> **阶段 16 变更（2026-11-20）**：`app/privacy/receipt.py` 与 `app/agent/thin.py` 已删除
+> （从未接线，只被测试引用）；`app/data/semantic_tags.yaml` 也已删除，六类标签的唯一源
+> 是 `app/utils/semantic_tags.py` + 生成器。本文相关章节保留作设计参考，但不是现状。
+
+---
+
 ## 0. 一句话
 
 > **同一份旅行记忆，三档执行：本机能答的本机答，需要措辞的只发选中的几条，需要综合的才上传索引——每一档都给你一张小票。**
@@ -113,20 +119,21 @@ L2 超时/超预算 → 回退 L1 或 L0，回答照出，小票标 `degraded_re
 
 ## 5. 数据契约
 
-### 5.0 已经写好的部分（不是设计稿）
+### 5.0 曾经写好、阶段 16 已删除的部分
 
 | 文件 | 内容 | 验证 |
 | --- | --- | --- |
-| `backend/app/privacy/receipt.py` | 三档小票 + 不变量 + 摘要 + 外部校验 | `tests/test_privacy_receipt.py` 15 passed |
-| `backend/app/agent/thin.py` | L1 无状态生成（复用 build_context/generate/self_check） | `tests/test_thin_engine.py` 8 passed |
-| `backend/tests/*` | 23 条契约测试 | `ruff` 全绿 |
+| `backend/app/privacy/receipt.py` | 三档小票 + 不变量 + 摘要 + 外部校验 | 曾 15 passed；**阶段 16 删除** |
+| `backend/app/agent/thin.py` | L1 无状态生成（复用 build_context/generate/self_check） | 曾 8 passed；**阶段 16 删除** |
+| ~~`backend/tests/*`~~ | ~~23 条契约测试~~ | 随源码一并删除（阶段 16） |
 
 HTTP 层（`POST /api/v1/agent/answer-with-context`）与前端徽章还没接——
 它们是 D2/D8 的工作，不是"设计里假设存在"。
 
-### 5.1 数据小票（已实现）
+### 5.1 数据小票（设计稿；原实现已于阶段 16 删除）
 
-代码：`backend/app/privacy/receipt.py`，测试：`backend/tests/test_privacy_receipt.py`（15 passed）。
+原代码 `backend/app/privacy/receipt.py` 与 15 条测试已在阶段 16 删除 —— 它没有任何 HTTP 入口。
+下面保留字段设计，供真正接线时参考。
 
 ```json
 {
@@ -196,7 +203,7 @@ meta → evidence → delta* → receipt → done
 | --- | --- | --- |
 | `Memory`（kind=`gift`） | 本机 `gift_memory` 表（IndexedDB） | 一一对应 |
 | `ProvenanceEdge` | `MemorySourceRef(source_type="friend_share")` | `shareId + fromPubkey + signature` 三字段保留 |
-| `Tag` 六类 | `semantic_tags.yaml` 的 `id` | 已一致 |
+| `Tag` 六类 | `utils/semantic_tags.py` 的 `SEMANTIC_TAGS`（阶段 16 起唯一源） | 已一致 |
 | `explain()` 的 `[gift:s_xxx]` | 回答里的引用编号 | L0 直接展示；L2 **不注入** |
 
 **硬规则：信物内容不进入 L1/L2 的上传载荷。**

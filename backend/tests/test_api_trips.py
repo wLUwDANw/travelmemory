@@ -28,6 +28,7 @@ Mock 一个 session 只会验证"代码调用了 delete"，而不是"删的范�
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 import httpx
 import pytest
@@ -38,7 +39,11 @@ from app.core.config import get_settings
 from app.db.session import SessionFactory, dispose_engine
 from app.main import app
 from app.models.user import User
-from app.services.trip_service import create_manual_trip, rebuild_user_trips
+from app.services.trip_service import (
+    assign_photos_to_trip,
+    create_manual_trip,
+    rebuild_user_trips,
+)
 from app.services.user_service import get_or_create_demo_user
 
 _TRIPS_URL = "/api/v1/trips"
@@ -309,3 +314,52 @@ async def test_rename_promotes_cluster_trip_to_manual(
     assert renamed, "改名后的行程被重建冲掉了"
     assert renamed[0].title == "洛阳两日", "标题被重建回退了"
     assert renamed[0].source == "manual"
+
+
+# ---------------------------------------------------------------- 阶段 16：导回日期
+
+
+async def test_create_trip_accepts_started_on(
+    client: httpx.AsyncClient, photo_import_enabled, db_user: str
+) -> None:
+    """`started_on` 必须落成 `started_at`，且日期部分原样保留。
+
+    这条修的是阶段 15 的 P1：journey 包里有 `days[0].date`，但导入时没有入口
+    把它写进行程，于是列表里显示"日期未知"。
+    """
+    response = await client.post(
+        _TRIPS_URL, json={"title": "洛阳两日", "started_on": "2025-10-04"}
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["trip"]["started_at"].startswith("2025-10-04")
+
+
+async def test_started_on_survives_photo_assign(
+    photo_import_enabled, db_user: str
+) -> None:
+    """挂照片时**不得用 None 覆盖已知日期**。
+
+    导入的缩略图没有 EXIF，`_earliest(photos)` 恒为 None。阶段 15 的实现
+    无条件 `trip.started_at = _earliest(photos)`，于是刚写进去的日期
+    会被紧接着的挂照片动作抹掉 —— 这是同一个 P1 的另一半。
+    """
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        trip = await create_manual_trip(
+            session, user_id=user.id, title="洛阳两日", started_on=date(2025, 10, 4)
+        )
+        await session.commit()
+        trip_id = trip.id
+
+    async with SessionFactory() as session:
+        user = await get_or_create_demo_user(session)
+        await assign_photos_to_trip(session, user_id=user.id, trip_id=trip_id, photo_ids=[])
+        await session.commit()
+
+    async with SessionFactory() as session:
+        from app.models.trip import Trip
+
+        after = await session.get(Trip, trip_id)
+        assert after is not None
+        assert after.started_at is not None, "挂照片把已知日期抹成了 None"
+        assert after.started_at.date().isoformat() == "2025-10-04"

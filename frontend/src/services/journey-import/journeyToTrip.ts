@@ -57,6 +57,8 @@ export interface JourneyPhotoPlan {
 /** 一次导回的完整计划。 */
 export interface JourneyImportPlan {
   title: string;
+  /** 行程起始日（`days[0].date`，YYYY-MM-DD）；包里没有就 undefined。 */
+  startedOn?: string;
   photos: JourneyPhotoPlan[];
   /** 因为缩略图不合规被丢弃的张数（非 data URL / 空 / 超限 / 解码失败）。 */
   droppedPhotos: number;
@@ -77,6 +79,20 @@ export interface JourneyImportDeps {
   createTrip?: typeof createTrip;
   assignTripPhotos?: typeof assignTripPhotos;
   patchPhotoLocation?: typeof patchPhotoLocation;
+}
+
+
+/**
+ * 把 journey 包的 `days[].date` 归一成 `YYYY-MM-DD`。
+ *
+ * 只认日期或 ISO 时间戳两种形态：`2025-10-04` 与 `2025-10-04T09:00:00+08:00`
+ * 都取前 10 位，其余（空串、`10/04/2025`、时间戳数字）一律返回 undefined。
+ * **宁可没有日期，也不猜一个**：猜错会让行程按错误的月份分组。
+ */
+function normalizeDayDate(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const candidate = value.trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : undefined;
 }
 
 /** 安全地取一个对象（数组 / null / 原始值一律返回 null）。 */
@@ -159,6 +175,9 @@ export function planJourneyImport(journey: unknown): JourneyImportPlan {
 
   const rawTitle = typeof root.title === 'string' ? root.title.trim() : '';
   const title = rawTitle.length > 0 ? rawTitle : '未命名旅程';
+  // 第 1 天的日期是行程起始日**唯一**的事实来源：缩略图没有 EXIF，
+  // 后端无法从照片反推（见文件末 `importJourneyToMain` 的说明）。
+  const startedOn = normalizeDayDate(asRecord(root.days[0])?.date);
 
   const photos: JourneyPhotoPlan[] = [];
   let droppedPhotos = 0;
@@ -208,12 +227,10 @@ export function planJourneyImport(journey: unknown): JourneyImportPlan {
     }
   }
 
-  // TODO(歧义): journey 的 `days[].date` 与 `photos[].takenAt` 无处安放 ——
-  //  后端没有"给已入库照片改拍摄时间"的接口（只有 `/location` 与列表查询），
-  //  所以导入后照片的 takenAt 由后端从这张缩略图 JPEG 的 EXIF 里读（通常是 null）。
-  //  当前保留顺序靠 `assignTripPhotos` 的 ord，不尝试伪造时间戳。
+  // `days[0].date` 已随计划带出（`startedOn`），由 `createTrip` 写进行程；
+  // `photos[].takenAt` 仍然无处安放：后端没有"给已入库照片改拍摄时间"的接口。
   // TODO(歧义): `caption` 同样无处安放（没有 caption 写接口），计划里保留字段但不提交。
-  return { title, photos, droppedPhotos };
+  return { title, startedOn, photos, droppedPhotos };
 }
 
 /** 一张计划照片 → `File`（后端要 multipart 文件）。 */
@@ -256,7 +273,7 @@ export async function importJourneyToMain(
   const patchPhotoLocationImpl = deps.patchPhotoLocation ?? patchPhotoLocation;
 
   const photoIds: string[] = [];
-  /** 成功入库且带坐标的照片：等挂完行程再补标（补标失败不影响它们已在行程里）。 */
+  /** 成功入库且带坐标的照片：**挂行程之前**补标，否则 trip_item 快照里是 null。 */
   const pendingLocations: Array<{ photoId: string; lat: number; lng: number }> = [];
   let failedPhotos = 0;
 
@@ -300,22 +317,29 @@ export async function importJourneyToMain(
     );
   }
 
-  const trip: TripView = await createTripImpl(plan.title);
+  const trip: TripView = await createTripImpl(
+    plan.title,
+    plan.startedOn ? { startedOn: plan.startedOn } : undefined,
+  );
   const tripId = trip.id;
   if (typeof tripId !== 'string' || tripId.length === 0) {
     throw new Error('新建旅程失败：后端没有返回行程 id');
   }
 
-  // 顺序 = journey 顺序（后端按传入 order 存 ord）
-  await assignTripPhotosImpl(tripId, photoIds);
-
+  // **先补坐标、再挂行程**：`assign_photos_to_trip` 会把 `photo.lat/lng` 快照进
+  // `trip_item`。反过来的话，挂进去的那一瞬间坐标还是 null，于是地图上出现
+  // "5 张照片未定位" —— 这正是阶段 15 那条 P1 的另一半。
+  // 补标失败不影响挂载：行程结构仍然正确，只是那几张点不在地图上。
   for (const location of pendingLocations) {
     try {
       await patchPhotoLocationImpl(location.photoId, location.lat, location.lng);
     } catch {
-      // best-effort：记数没有意义（没有 UI 展示位），下次补标由用户手动做
+      // best-effort：没有 UI 展示位可计数，用户下次可手动补标
     }
   }
+
+  // 顺序 = journey 顺序（后端按传入 order 存 ord）
+  await assignTripPhotosImpl(tripId, photoIds);
 
   return {
     tripId,

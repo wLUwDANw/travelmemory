@@ -28,7 +28,7 @@
 | 3 | 事实性回答引用率 100%，无证据必须拒答 | 核心硬指标失效 |
 | 4 | 依赖方向单向：`agent → nodes → tools → services → models` | 视为缺陷，CI 拦截 |
 | 5 | 可观测统一由 `observability.py` 写，节点只调 `trace.step(...)` | trace 口径不一致，无法归因 |
-| 6 | 换 embedding 模型 → `make reindex`；换语义字典 → `make resemantic` | 产生脏向量 / 脏模式 |
+| 6 | 换 embedding 模型 → `make reindex` | 产生脏向量 |
 | 7 | 阶段严格串行，上一阶段出口条件未满足不得进入下一阶段 | 范围蔓延 |
 | 8 | 扩展模块走 feature flag，默认全关；失败必须降级而非抛错 | 主线被拖垮 |
 | 9 | 分享信物的解密私钥（X25519）永远只在用户设备本地生成，绝不上传服务端；服务端只收孤立坐标点、只回加噪点 | 隐私保证形同虚设 |
@@ -46,16 +46,23 @@ JS 侧是 npm workspaces（在仓库根 `npm install` 一次装完）：
 
 ```
 frontend/        主应用（React + TS + Capacitor）
-showcase/        轨迹回放展示站（深色 HUD，零后端依赖，可独立运行）
-packages/geo/         坐标与地图基础（主应用与展示站共用）
-packages/amap-loader/ 高德 JS API 2.0 加载原语（主应用与展示站共用）
+apps/track-studio/         轨迹演示（独立小应用，可单独打开，也可被 iframe 嵌入）
+apps/trailshare-standalone/ 分享旅程（同上，全程零网络请求）
+packages/geo/         坐标与地图基础（主应用与小应用共用）
+packages/amap-loader/ 高德 JS API 2.0 加载原语（主应用与小应用共用）
 packages/trail/       轨迹回放内核（样条/相机/时钟/投影/渲染器，不含 React）
+packages/journey-transfer/ 旅程包的导入/导出线格式
+packages/photo-source/     照片来源抽象（系统相册 / 文件选择器）
 backend/              Python 后端
 ```
 
-**依赖方向**：`宿主（frontend / showcase） → packages/trail → packages/geo`，单向不回头；
+**依赖方向**：`宿主（frontend / apps/*） → packages/trail → packages/geo`，单向不回头；
 `宿主 → packages/amap-loader` 是另一条并列箭头，**不经过回放内核**（主应用的地图相册
 不是回放，也要加载地图）。内核里出现 React 就说明抽错了层——那是宿主的事。
+
+阶段 16 起，这条方向由 `tools/check-import-boundaries.mjs` 在 CI 里检查：
+小应用不得 import 主应用、共享包不得 import 任何宿主、跨包 import 必须在 package.json 里声明。
+`showcase/` 已在阶段 16 物理删除（阶段 9 起已退役，阶段 13 主应用改指 `embed.html`）。
 
 **共享代码的判定标准**：两个及以上工作区都要用，且没有应用专属的错误文案 / UI 语义，
 才允许进 `packages/`。只被一个工作区用的抽象不进包——那是提前抽象。

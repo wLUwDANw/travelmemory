@@ -70,6 +70,7 @@ import {
   type LayerVisibility,
 } from './layers';
 import { tripPointsFromTrips } from './tripPoints';
+import { splitTrips } from './tripScope';
 
 export interface MapPageProps {
   /** 信物解包结果里的全部地点（已过验签）。坐标是 WGS84（模糊后）。 */
@@ -110,12 +111,19 @@ export function MapPage({
   const [locationEditorOpen, setLocationEditorOpen] = useState(false);
   const mapRef = useRef<MapHandle | null>(null);
 
-  // 两个数据源拼成一份点列表：图层开关与渲染计划都只认 `MapPointInput`，
+  // 三个数据源拼成一份点列表：图层开关与渲染计划都只认 `MapPointInput`，
   // 所以"合流"发生在这一层，layers.ts 不需要知道行程是什么。
-  const points = useMemo(
-    () => [...sharePointsFromPlaces(sharePlaces), ...tripPointsFromTrips(trips)],
-    [sharePlaces, trips],
-  );
+  //
+  // 阶段 17：朋友的行程单独打 `friend` 标签，默认由 `DEFAULT_LAYER_VISIBILITY`
+  // 关掉 —— 它不是"更多点"，而是"别人的点"，混进 photo 层会被当成自己去过的地方。
+  const points = useMemo(() => {
+    const { mine, friends } = splitTrips(trips);
+    return [
+      ...sharePointsFromPlaces(sharePlaces),
+      ...tripPointsFromTrips(mine, 'photo'),
+      ...tripPointsFromTrips(friends, 'friend'),
+    ];
+  }, [sharePlaces, trips]);
   // 可见点数 / 已隐藏点数都来自纯逻辑层，UI 不自己数一遍
   const plan = useMemo(() => planMapRender(points, visibility), [points, visibility]);
   const shareCount = useMemo(() => points.filter((p) => p.source === 'share').length, [points]);

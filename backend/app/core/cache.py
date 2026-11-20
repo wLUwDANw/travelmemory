@@ -568,51 +568,12 @@ def session_key(session_id: str) -> str:
     return f"sess:{session_id}"
 
 
-class SessionStore:
-    """短期会话存储（阶段 3 W3-3 用途 ③）。
-
-    ## 为什么阶段 3 只做"存"，不做"用"
-
-    短期记忆的**策略**（保留几轮、怎么衰减、要不要摘要）属于阶段 4 W4-1。
-    阶段 3 只把滑窗存储做好并测通 —— 策略没定就先写策略，等于把未验证的假设固化进代码。
-
-    ## 为什么是滑动窗口而不是全量累加
-
-    对话历史是无界的，而上下文预算是有界的。窗口长度由 `session_window_max` 控制，
-    超出部分由 `LPUSH + LTRIM`（内存实现里是 `deque(maxlen)`）自动丢弃最旧的一轮。
-    """
-
-    def __init__(self, cache: CacheClient, *, window: int = 20) -> None:
-        self.cache = cache
-        self.window = max(1, int(window))
-
-    async def append(self, session_id: str, message: dict) -> None:
-        """追加一轮对话（最旧的会被自动挤出窗口）。"""
-        try:
-            await self.cache.lpush(
-                session_key(session_id),
-                json.dumps(message, ensure_ascii=False),
-                max_len=self.window,
-                ttl_sec=TTL_SESSION_SEC,
-            )
-        except Exception as exc:  # noqa: BLE001 - 会话态是旁路，写失败不该打断问答
-            logger.warning("会话态写入失败（不影响本次问答）：%s", exc)
-
-    async def recent(self, session_id: str) -> list[dict]:
-        """读取最近的对话（**按时间正序**返回， oldest → newest）。"""
-        try:
-            raw = await self.cache.lrange(session_key(session_id))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("会话态读取失败，按空会话处理：%s", exc)
-            return []
-        items: list[dict] = []
-        # lpush 是往头部塞，所以存储顺序是"新的在前"；这里反转成自然对话顺序
-        for line in reversed(raw):
-            try:
-                items.append(json.loads(line))
-            except Exception:  # noqa: BLE001 - 单条脏数据不应毁掉整个会话
-                continue
-        return items
+# 阶段 16：`SessionStore` 已删除。
+#
+# 它从未被任何生产代码调用 —— 会话历史走 `agent.memory`（阶段 4 的 MemoryService），
+# 而不是缓存里的一个 list。留着它的代价不是几十行代码，是**误导**：
+# 读代码的人会以为"会话态在 Redis 里"，于是去改一个根本不在链路上的类。
+# 缓存层的 `lpush` / `lrange` 仍然保留（它们是通用原语，且有独立的形状测试）。
 
 
 def assert_allowed_key(key: str) -> str:

@@ -426,29 +426,69 @@ async def test_both_runtimes_agree_on_answer_shape(monkeypatch, store, user_id):
     assert len(results[RUNTIME_PIPELINE].blocks) == len(results[RUNTIME_GRAPH].blocks)
 
 
-@pytest.mark.asyncio
-async def test_graph_event_sequence_matches_pipeline(monkeypatch, store, user_id):
-    """SSE 事件类型序列一致 —— 前端不需要为两种运行时写两套解析。"""
+def _build_runtime(monkeypatch, store, runtime: str, *, answers=None):
+    """构造指定运行时（阶段 16 的契约测试要成对跑同一道题）。"""
     from app.agent.pipeline import AgentPipeline
 
+    monkeypatch.setenv("AGENT_RUNTIME", runtime)
+    get_settings.cache_clear()
+    settings = get_settings()
+    retriever = Retriever(
+        store, build_embedder(settings), RetrieverConfig(top_k=5, min_score=0.05)
+    )
+    llm = ScriptedLLM(settings, answers)
+    runner: Any = (
+        LangGraphAgent(llm, retriever, max_context_chars=2000, settings=settings)
+        if runtime == RUNTIME_GRAPH
+        else AgentPipeline(llm, retriever, max_context_chars=2000, settings=settings)
+    )
+    return runner, llm, settings
+
+
+@pytest.mark.asyncio
+async def test_event_sequence_matches_pipeline(monkeypatch, store, user_id):
+    """**完整**事件类型序列一致，而不是只比 parsed/evidence/done。
+
+    阶段 16 之前这里用 `{parsed, evidence, done}` 过滤过 —— 那个断言在
+    两套运行时的 delta / tool / restart 位置不同时依然是绿的，等于没测。
+    前端是逐条解析 SSE 的，顺序不同就是 bug。
+    """
     query = "乌镇 西塘 摇橹船 夜景"
     kinds: dict[str, list[str]] = {}
     for runtime in (RUNTIME_PIPELINE, RUNTIME_GRAPH):
-        monkeypatch.setenv("AGENT_RUNTIME", runtime)
-        get_settings.cache_clear()
-        settings = get_settings()
-        embedder = build_embedder(settings)
-        retriever = Retriever(store, embedder, RetrieverConfig(top_k=5, min_score=0.05))
-        llm = build_llm(settings)
-        runner: Any = (
-            LangGraphAgent(llm, retriever, settings=settings)
-            if runtime == RUNTIME_GRAPH
-            else AgentPipeline(llm, retriever, settings=settings)
-        )
-        seq = []
-        async for event in runner.run_stream(user_id=user_id, session_id="s", query=query):
-            seq.append(event["type"])
-        kinds[runtime] = [k for k in seq if k in {"parsed", "evidence", "done"}]
+        runner, _llm, _settings = _build_runtime(monkeypatch, store, runtime)
+        kinds[runtime] = [
+            event["type"]
+            async for event in runner.run_stream(user_id=user_id, session_id="s", query=query)
+        ]
 
     assert kinds[RUNTIME_PIPELINE] == kinds[RUNTIME_GRAPH]
-    assert kinds[RUNTIME_GRAPH] == ["parsed", "evidence", "done"]
+    assert kinds[RUNTIME_GRAPH][0] == "parsed"
+    assert kinds[RUNTIME_GRAPH][-1] == "done"
+    assert "evidence" in kinds[RUNTIME_GRAPH]
+
+
+@pytest.mark.asyncio
+async def test_retry_budget_matches_between_runtimes(monkeypatch, store, user_id):
+    """self_check 失败后的重试次数必须逐次一致（配置里只有一个数字）。
+
+    第一版回答故意不带引用 → 触发 restart → 第二版带引用 → 通过。
+    两套运行时都应该恰好重试 **1** 次，且最终答案相同。
+    """
+    answers = {"generate": ["这段回答没有任何引用。", "依据记录回答[1]。"]}
+    observed: dict[str, dict[str, Any]] = {}
+
+    for runtime in (RUNTIME_PIPELINE, RUNTIME_GRAPH):
+        runner, llm, _settings = _build_runtime(
+            monkeypatch, store, runtime, answers={"generate": list(answers["generate"])}
+        )
+        state = await runner.run(user_id=user_id, session_id="s", query="乌镇 西塘 摇橹船 夜景")
+        observed[runtime] = {
+            "generate_calls": sum(1 for call in llm.calls if call["purpose"] == "generate"),
+            "answer": state.answer,
+            "refused": state.refused,
+        }
+
+    # 第一次生成无引用 → 重试一次 → 第二次通过：两次调用，不是一次也不是三次
+    assert observed[RUNTIME_PIPELINE]["generate_calls"] == 2
+    assert observed[RUNTIME_GRAPH] == observed[RUNTIME_PIPELINE]

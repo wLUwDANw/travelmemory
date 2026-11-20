@@ -19,7 +19,8 @@
  *
  * `ALL_SEMANTIC_TAGS` 必须与后端 `SEMANTIC_TAGS` **逐项同序**：后端平票时按数组顺序取，
  * 前端 `ALL_TAGS`（`types/share.ts`）也是同一顺序。**只能追加，不能重排**。
- * `semanticTags.test.ts` 会用正则从 `backend/app/utils/semantic_tags.py` 里抽出数组来断言这一点。
+ * 阶段 16 起两者都来自 `src/generated/semanticTags.ts`（由 Python 词表生成），
+ * `semanticTags.test.ts` 仍保留"从 py 源码抠数组比对"的第二道守卫。
  *
  * ## 本次不改动分享协议
  *
@@ -27,17 +28,16 @@
  * 这里只是确保它**一定是六类之一**，没有新增字段、没有改线格式。
  */
 
+import { SEMANTIC_TAGS } from '../../generated/semanticTags';
 import type { Tag } from '../../types/share';
 
-/** 六类语义标签。**顺序必须与后端 `SEMANTIC_TAGS` 逐项一致**，禁止重排。 */
-export const ALL_SEMANTIC_TAGS: readonly Tag[] = [
-  'heritage',
-  'nature',
-  'watertown',
-  'metropolis',
-  'food',
-  'leisure',
-];
+/**
+ * 六类语义标签。**顺序必须与后端 `SEMANTIC_TAGS` 逐项一致**，禁止重排。
+ *
+ * 阶段 16 起这份数组由 `tools/gen_semantic_tags.py` 生成，不再手写 —— 手写的副本
+ * 是"六份名单"里最容易漏改的一份（它甚至不在 `types/share.ts` 里，grep 都容易漏）。
+ */
+export const ALL_SEMANTIC_TAGS: readonly Tag[] = SEMANTIC_TAGS;
 
 /** 缺省兜底标签：无法归类时用它（"休闲度假"是最中性的一类，不会凭空暗示地点性质）。 */
 export const FALLBACK_SEMANTIC_TAG: Tag = 'leisure';

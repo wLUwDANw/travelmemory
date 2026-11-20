@@ -1,14 +1,16 @@
-.PHONY: install dev web-install web-dev web-typecheck up down db-shell migrate test lint \
-        eval eval-time eval-ablation eval-ablation-offline eval-compare cli check seed-demo \
-        caption-batch index-batch reindex \
-        semantic-batch resemantic anchor-batch \
-        exp-privacy exp-recommend test-degradation \
-        eval-tools cache-stats dashboard dashboard-demo
+.PHONY: install install-dev dev web-install web-dev web-typecheck up up-stage3 up-stage6 down db-shell migrate \
+        test lint guards test-degradation js-check cli check seed-demo seed-photos \
+        eval eval-time eval-ablation eval-ablation-offline eval-compare eval-tools \
+        cache-stats dashboard dashboard-demo \
+        caption-batch index-batch reindex
 
 # ---------- 基础设施 ----------
 
 install:
 	cd backend && pip install -r requirements.txt
+
+install-dev:
+	cd backend && pip install -r requirements.txt -r requirements-dev.txt
 
 up:
 	docker compose up -d --build
@@ -33,7 +35,7 @@ migrate:
 dev:
 	cd backend && uvicorn app.main:app --reload
 
-web-install:                  # 依赖安装（在仓库根跑一次，覆盖 frontend / showcase / packages）
+web-install:                  # 依赖安装（在仓库根跑一次，覆盖全部 workspace）
 	npm install
 
 web-dev:                      # 主应用开发服务器（5173，/api 代理到 8000）
@@ -42,15 +44,10 @@ web-dev:                      # 主应用开发服务器（5173，/api 代理到
 web-typecheck:                # 主应用类型检查 + 生产构建
 	cd frontend && npm run build
 
-showcase-dev:                 # 轨迹回放展示站（独立运行，不需要后端）
-	cd showcase && npm run dev
-
-showcase-build:               # 展示站生产构建
-	cd showcase && npm run build
-
-js-check:                     # 三个 JS 工作区的类型检查 + 测试（提交前跑这个）
+js-check:                     # 全部 JS 工作区：类型 + 测试 + 跨包边界（提交前跑这个）
 	npm run typecheck
 	npm run test
+	npm run check:boundaries
 
 cli:
 	cd backend && python -m app.cli
@@ -66,6 +63,11 @@ seed-photos:                 # 阶段 1：合成演示照片元数据（无图�
 
 lint:
 	cd backend && ruff check . && mypy app
+
+guards:                      # 阶段 16：文档索引 + 生成物 + 跨工作区依赖边界（不跑测试，秒级）
+	python tools/check_stage_index.py
+	python tools/gen_semantic_tags.py --check
+	npm run check:boundaries
 
 test:
 	# ★ 必须是 `python -m pytest` 而不是 `pytest`：
@@ -119,19 +121,9 @@ index-batch:
 reindex:                      # 换 embedding 模型后必须执行
 	cd backend && python -m app.jobs.index_job --force
 
-# ---------- 科研轨（阶段 7，feature flag 关闭时无副作用）----------
-
-semantic-batch:
-	cd backend && python -m app.jobs.semantic_job --limit 500
-
-resemantic:                   # 换语义标签字典后必须执行
-	cd backend && python -m app.jobs.semantic_job --force
-
-anchor-batch:                 # 异步链上锚定，失败不阻塞
-	cd backend && python -m app.jobs.anchor_job
-
-exp-privacy:                  # 隐私-效用曲线
-	cd research && python experiments/privacy_utility_curve.py
-
-exp-recommend:                # 留一法语义推荐
-	cd research && python experiments/leave_one_out.py
+# 阶段 16 删掉的四个 target：
+#   semantic-batch / resemantic → 指向从不存在的 `app.jobs.semantic_job`
+#   anchor-batch                → 指向从不存在的 `app.jobs.anchor_job`
+#   exp-privacy / exp-recommend → 指向已被清空的 `research/experiments/`
+# 可执行的 Makefile 承诺比文档更硬：`make semantic-batch` 会在用户面前直接 ModuleNotFound。
+# 语义分类当前在请求路径上计算（不落库），没有"重算"这件事，因此不需要替代 target。

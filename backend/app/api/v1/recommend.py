@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.core.feature_flags import is_enabled
+from app.api.deps import ensure_flag
 from app.schemas.semantic import (
     SemanticContributeResponse,
     SemanticRecommendResponse,
@@ -71,8 +71,7 @@ async def recommend_semantic(req: SemanticSequenceRequest) -> SemanticRecommendR
     只查**已发布**（`support >= k`）的模式 —— 见模块 docstring 与
     `app/services/semantic_trajectory.py` 里 `recommend()` 的红线说明。
     """
-    if not is_enabled("semantic"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("semantic")
 
     tags = _checked_tags(req)
     # 查询侧也要截断：长历史本身就是指纹，且模式库里的前缀最长也只有 6 步，
@@ -113,8 +112,7 @@ async def contribute_semantic(req: SemanticSequenceRequest) -> SemanticContribut
     上报内容里**没有任何地点名、坐标或时间**：它们在上一步的
     `extract_sequences()` 里就已经被丢掉了。
     """
-    if not is_enabled("semantic"):
-        raise HTTPException(status_code=404, detail="该能力未启用")
+    ensure_flag("semantic")
 
     tags = _checked_tags(req)
     aggregator = build_aggregator()

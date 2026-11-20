@@ -63,10 +63,8 @@ from app.core.feature_flags import is_enabled
 from app.utils.semantic_tags import (
     SEMANTIC_TAG_LABELS,
     SEMANTIC_TAG_VERSION,
-    SEMANTIC_TAGS,
-    TAG_KEYWORDS,
-    classify_semantic_tag,
     is_semantic_tag,
+    match_semantic_tag,
 )
 
 #: re-export：上层（模式挖掘 / API）引用版本号时不必再往下 import utils。
@@ -101,60 +99,6 @@ class _PhotoLike(Protocol):
     caption: str | None
 
 
-def _segments(
-    poi_type: str | None,
-    ai_tags: Sequence[str] | None,
-    name: str | None,
-) -> list[str]:
-    """展开"参与投票的输入段"：`poi_type` 与 `name` 各一段，`ai_tags` **每项**各一段。
-
-    `ai_tags` 逐项而不是拼成一个大字符串：拼串会让"命中了三类"和"某一类命中三次"
-    无法区分，而前者才是有信息量的证据。
-    """
-    segments: list[str] = [item for item in (poi_type, name) if item]
-    segments.extend(item for item in (ai_tags or ()) if item)
-    return segments
-
-
-def _vote(segments: Sequence[str]) -> tuple[dict[str, int], dict[str, int], dict[str, list[str]]]:
-    """对每段输入投票。
-
-    返回 `(票数, 各类最长命中词长度, 各类命中的原始片段)`。
-    一段文本对同一类最多投 1 票（与 `score_semantic_tags` 一致的去重口径：
-    否则"山山山"这种噪声文本会把自己刷成 nature）。
-    """
-    scores: dict[str, int] = {}
-    longest: dict[str, int] = {}
-    matched: dict[str, list[str]] = {}
-    for segment in segments:
-        haystack = segment.lower()
-        for tag, keywords in TAG_KEYWORDS.items():
-            hit = max((keyword for keyword in keywords if keyword in haystack), key=len, default="")
-            if not hit:
-                continue
-            scores[tag] = scores.get(tag, 0) + 1
-            longest[tag] = max(longest.get(tag, 0), len(hit))
-            matched.setdefault(tag, []).append(segment)
-    return scores, longest, matched
-
-
-def _break_tie(scores: dict[str, int], longest: dict[str, int], default: str | None) -> str | None:
-    """平票修正：票数相同的候选里，**命中词更具体**的那一类胜出。
-
-    `default` 是词表层的答案（`classify_semantic_tag`），即"按 `SEMANTIC_TAGS`
-    顺序取靠前的"。只有真的平票、且存在更长（更具体）的命中词时才覆盖它 ——
-    见模块 docstring 第 2 条里 `平江路` 的例子。命中词长度也相同时退回 `default`，
-    保证"平票按 `SEMANTIC_TAGS` 顺序"这条契约在长度无法区分时依然成立。
-    """
-    if not scores or default is None:
-        return None
-    top = scores[default]
-    tied = [tag for tag in SEMANTIC_TAGS if scores.get(tag, 0) == top]
-    if len(tied) <= 1:
-        return default
-    return max(tied, key=lambda tag: (longest.get(tag, 0), -SEMANTIC_TAGS.index(tag)))
-
-
 def classify_place(
     *,
     poi_type: str | None = None,
@@ -172,15 +116,8 @@ def classify_place(
     `matched` 只记命中的**原始**输入片段（小写化之前的样子），
     因为排障时人要看的是"我传进来的哪一个字符串触发了它"。
     """
-    segments = _segments(poi_type, ai_tags, name)
-    scores, longest, matched = _vote(segments)
-
-    tag = _break_tie(
-        scores,
-        longest,
-        classify_semantic_tag(poi_type=poi_type, ai_tags=ai_tags, name=name),
-    )
-    if tag is None:
+    match = match_semantic_tag(poi_type=poi_type, ai_tags=ai_tags, name=name)
+    if match.tag is None:
         return SemanticTagResult(
             tag=None,
             label=None,
@@ -189,13 +126,14 @@ def classify_place(
             confidence=0.0,
         )
 
-    total = len(segments)
-    confidence = 0.0 if total == 0 else min(1.0, scores[tag] / total)
+    # confidence = 胜出票数 / 参与投票的段数（口径见 `classify_place` docstring）。
+    total = match.segment_count
+    confidence = 0.0 if total == 0 else min(1.0, match.scores[match.tag] / total)
     return SemanticTagResult(
-        tag=tag,
-        label=SEMANTIC_TAG_LABELS[tag],
+        tag=match.tag,
+        label=SEMANTIC_TAG_LABELS[match.tag],
         version=VERSION,
-        matched=tuple(matched.get(tag, ())),
+        matched=match.matched.get(match.tag, ()),
         confidence=confidence,
     )
 

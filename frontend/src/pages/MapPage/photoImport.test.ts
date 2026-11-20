@@ -244,4 +244,10 @@ describe('行程 → 地图点', () => {
     const shared = { ...trip, id: 't2', items: [trip.items[0]] };
     expect(tripPointsFromTrips([trip, shared])).toHaveLength(2);
   });
+
+  it('朋友导回的行程用 friend 来源，不与本机照片混层', () => {
+    const points = tripPointsFromTrips([trip], 'friend');
+    expect(points.length).toBeGreaterThan(0);
+    expect(points.every((point) => point.source === 'friend')).toBe(true);
+  });
 });

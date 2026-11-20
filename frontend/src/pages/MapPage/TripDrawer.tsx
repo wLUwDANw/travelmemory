@@ -535,22 +535,25 @@ export function TripDrawer({
               </div>
             )}
 
-            {/* W15-5：地图叠加留到阶段 16。**故意做成 disabled + 写明原因**，
-                而不是先接上"看起来能点但点了没反应"的开关。 */}
-            <div className="mt-3 flex items-start gap-2 rounded-lg border border-dashed px-3 py-2">
+            {/* W15-5 / 阶段 17：朋友的分享图层。
+                默认关闭（`DEFAULT_LAYER_VISIBILITY.friend = false`）——
+                朋友的点画上来容易被误认成自己去过的地方，必须由用户显式打开。
+                打开后这些点带 `source: 'friend'`，渲染时挂「朋友的分享」标签。 */}
+            <div className="mt-3 flex items-start gap-2 rounded-lg border px-3 py-2">
               <Checkbox
                 id="layer-friend-share"
-                checked={false}
-                disabled
+                checked={visibility.friend}
+                onCheckedChange={() => onToggleLayer('friend')}
                 aria-label="在地图上显示朋友的分享"
-                title="地图叠加待阶段 16：现在打开会画出不属于你的点，容易误认成自己拍的照片"
               />
               <Label
                 htmlFor="layer-friend-share"
-                className="flex flex-1 cursor-not-allowed flex-col gap-0.5 text-xs font-normal opacity-70"
+                className="flex flex-1 cursor-pointer flex-col gap-0.5 text-xs font-normal"
               >
                 <span>在地图上显示朋友的分享</span>
-                <span className="text-[11px] text-muted-foreground">（地图叠加待阶段16）</span>
+                <span className="text-[11px] text-muted-foreground">
+                  默认关闭；打开后朋友的点会标上「朋友的分享」，不会和你的照片混在一起
+                </span>
               </Label>
             </div>
           </div>

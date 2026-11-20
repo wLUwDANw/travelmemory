@@ -1113,7 +1113,7 @@ amap_timeout_sec: float = 6.0
 amap_max_retries: int = 1
 tool_timeout_sec: float = 8.0
 tool_max_retries: int = 1
-tool_rate_limit_per_min: int = 30
+# 阶段 16 删除：tool_rate_limit_per_min（宣称限流，但从未实现）
 
 # ---------------- 阶段 3：缓存 ----------------
 cache_backend: str = "auto"        # auto | memory | redis | null

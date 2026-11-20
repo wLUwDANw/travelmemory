@@ -20,8 +20,8 @@ settings = get_settings()
 
 app = FastAPI(
     title="旅忆地图 TravelMemory",
-    description="以个人照片地图记忆为数据源的旅行记忆 Agent（阶段 2：结构化混合检索 + SSE）",
-    version="0.0.0-stage2",
+    description="以个人照片地图记忆为数据源的旅行记忆 Agent（阶段 16：门禁与真相）",
+    version="0.16.0",
 )
 
 # 前端 dev server 在 5173，后端在 8000：开发期必须允许跨域。
@@ -42,7 +42,7 @@ async def health() -> dict:
     """存活探测。刻意不查数据库：容器编排需要一个轻量探针。"""
     return {
         "status": "ok",
-        "stage": 2,
+        "stage": 16,
         "runtime": settings.agent_runtime,
         "prompt_version": PROMPT_VERSION,
     }

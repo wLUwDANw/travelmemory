@@ -4,7 +4,7 @@
 
 完整设计见 **[旅忆地图 TravelMemory.md](./旅忆地图 TravelMemory.md)**，本文档只讲如何跑起来。
 项目约定见 [PROJECT.md](./PROJECT.md)，历史文档见 [docs/archive/](./docs/archive/)。
-**阶段复盘与原理讲解见 [docs/stages/](./docs/stages/)**（每完成一个阶段新增一份，阶段 0~3 已完成）。
+**阶段复盘与原理讲解见 [docs/stages/](./docs/stages/)**（每完成一个阶段新增一份，当前交付到阶段 16；索引带四态：已验证 / 未验证 / 未开始 / 已关闭）。
 
 ---
 
@@ -20,13 +20,35 @@ make seed-demo                # 导入演示语料（幂等）
 make cli                      # 阶段 0：纯文本 RAG 问答
 ```
 
+### 一键启动（Windows）
+
+双击仓库根目录的 `start-dev.bat`，等价于下面四条命令各开一个窗口。
+**端口就绪后会自动打开对应页面**（`main` 只开 5173；`apps` 开 5174 / 5175），
+最多等 30 秒，超时只提示、不阻塞。
+
+```bat
+start-dev.bat          :: 后端 8000 + 主应用 5173 + 轨迹演示 5174 + 分享旅程 5175
+start-dev.bat main     :: 只起后端 + 主应用（地图 / 问答）
+start-dev.bat apps     :: 只起两个独立小应用（不需要后端）
+start-dev.bat check    :: 只体检：虚拟环境 / node_modules / 5432 / 四个端口
+```
+
+**为什么是三个前端端口，而不是一个**：`5173` 主应用、`5174` 轨迹演示、`5175` 分享旅程。
+端口不同 = **origin 不同**，iframe 里的子应用读不到主应用的 `localStorage`（身份种子、
+好友列表都在那里）。合并成一个端口会让「小应用碰不到主应用数据」这条隐私边界直接消失。
+
+**为什么一个端口有两个入口**：`5174` / `5175` 各自构建两个 HTML —
+`http://localhost:5174/` 是独立版（CSP 只允许 `'self'`，全程零网络），
+`http://localhost:5174/embed.html` 是嵌入版（额外放行高德底图）。
+同一份代码、两套安全策略，不是两个版本。
+
 > 未配置 API Key 时会自动降级为**离线占位模式**（本地规则作答 + 本地哈希向量），
 > 此时只能验证链路是否通畅，回答质量不代表真实效果（且需把 `RETRIEVAL_MIN_SCORE` 调低，见下文）。
 >
 > Windows 用户请先读 [Windows 环境注意事项](#windows-环境注意事项实测于-windows-11-家庭版--powershell)
 > （没有 `make` 的替代命令、镜像方案、alembic 编码坑）。
 
-**阶段 0 验证清单**（三个出口条件逐条对应）：
+**验证清单（每次改动后都该跑；阶段 16 起多数已进 CI）**：
 
 | 步骤 | 命令 | 期待结果 |
 | --- | --- | --- |
@@ -36,7 +58,7 @@ make cli                      # 阶段 0：纯文本 RAG 问答
 | 检索指标 | `make eval` | 输出 Recall@5 / MRR |
 | 生成指标 | `python -m app.agent.eval.runner --full` | 引用率 1.00、拒答正确 1.00 |
 | 归因对比 | `make eval-compare` | 按 prompt_version / embedding_model 输出对比表 |
-| 单元测试 | `make test` | 通过（依赖数据库的用例在无 Docker 时自动跳过） |
+| 单元测试 | `make test` + `npm run test` | 后端 643 / 前端 954 全绿（CI 另起 Postgres，不跳过 DB 用例） |
 
 **阶段 1 已在阶段 0 之上跑通**（照片 → caption → 日文档），验证命令：
 
@@ -254,6 +276,9 @@ RETRIEVAL_MIN_SCORE=0.05
 ### 6. 本地 MinIO 走 HTTP，不开 HTTPS
 
 本地开发用 **HTTP**（`http://localhost:9000`，Console 是 `http://localhost:9001`）；
+> 阶段 16 删除了 `minio_*` 三个空配置字段（代码里从未读取）。本节保留作部署备忘，
+> 但当前产品链路**不走对象存储**：缩略图路径存在 `photo.local_thumb_path`，原图不落服务端。
+
 **生产部署时再启用 HTTPS**，届时需把正式证书挂载到容器的 `~/.minio/certs`。
 
 两个容易踩的点：
@@ -272,25 +297,29 @@ RETRIEVAL_MIN_SCORE=0.05
 
 ```
 frontend/   主应用：React + TS + Capacitor（Web / Android / iOS 同一套代码）
-showcase/   轨迹回放展示站：深色 HUD、零后端依赖，可独立运行
+apps/
+  track-studio/          轨迹演示：可单独打开（零后端），也可被主应用 iframe 嵌入
+  trailshare-standalone/ 分享旅程：独立版全程零网络请求（CSP 只放行自身）
 packages/
   amap-loader/ 高德 JS API 2.0 加载原语：去重、超时、script 复用、安全密钥
-            —— 主应用与展示站共用；两边的失败策略（抛错 / 降级）仍各自保留
+            —— 主应用与小应用共用；失败策略（抛错 / 降级）仍各自保留
   geo/      坐标与地图基础：WGS84↔GCJ-02、Web 墨卡托、球面距离（纯函数，零依赖）
-            —— 前端**唯一**的坐标转换入口，主应用与展示站共用
+            —— 前端**唯一**的坐标转换入口，主应用与小应用共用
   trail/    轨迹回放内核：样条、里程、路段、相机、Canvas 渲染（纯逻辑，不含 React）
+  journey-transfer/ 旅程包的导入/导出线格式（与后端 `journeyToTrip` 对应）
+  photo-source/     照片来源抽象（系统相册 / 文件选择器），小应用共用
 backend/app/
   api/ 接口层        schemas/ 接口契约      services/ 业务层
   agent/ Agent 运行时（pipeline / graph / rag / memory / eval / prompts）
   jobs/  离线批处理   tools/ 工具适配器
-  privacy/ 隐私机制（纯函数）   zk/ 电路执行（进程外，阶段 7）
+  privacy/ 隐私机制（纯函数）：拉普拉斯地理模糊
   models/ 表结构      core/ 配置 / LLM / Redis 缓存 / feature flags
 research/   实验脚本与结果（不参与部署）
 deploy/     Nginx 与生产 Compose
 tools/      真机验收工具：帧率曲线 / 回放与卡片复验 / CPU profile / 地图三处出图
             （都自包含，会自己拉起预览 + 无头浏览器；不参与构建与部署，别和 backend/app/tools 混了）
 docs/
-  stages/   阶段复盘与原理讲解（stage0~9）
+  stages/   阶段复盘与原理讲解（stage0~16）
   images/   验收截图
   design/   设计稿与提案      archive/ 历史文档
 ```
@@ -298,9 +327,12 @@ docs/
 **JS 侧的依赖安装只需在仓库根跑一次**（npm workspaces）：
 
 ```bash
-npm install            # 同时装好 frontend / showcase / packages/*
-npm run typecheck      # 四个工作区的类型检查
-npm run test           # 三个工作区的测试（frontend 320 + showcase 86 + geo 17）
+npm install            # 同时装好 frontend / apps/* / packages/*
+npm run typecheck      # 全部工作区的类型检查
+npm run test           # 全部工作区的测试（当前 954 条）
+npm run check:boundaries   # 跨工作区依赖边界（阶段 16 新增，CI 也跑）
+python tools/check_stage_index.py       # 阶段索引一致性
+python tools/gen_semantic_tags.py --check  # 语义标签生成物是否最新
 ```
 
 后端仍是 Python，走 `make` 与 `requirements.txt`，与 JS 工作区互不影响。

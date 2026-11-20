@@ -116,6 +116,11 @@ export interface TripsApiOptions {
   fetchImpl?: typeof fetch;
 }
 
+/** 建行程的选项：比通用选项多一个 `startedOn`（来自 journey 包的 `days[0].date`）。 */
+export interface CreateTripOptions extends TripsApiOptions {
+  startedOn?: string;
+}
+
 /** 错误信息里最多带多少响应体（同 `photos.ts`，防止错误页撑爆日志）。 */
 const MAX_ERROR_BODY = 500;
 
@@ -207,14 +212,21 @@ export interface RawTripCreateResponse {
  * 直接把 `HTTP 404` 抛给上层，用户看到的是一句看不懂的数字；
  * 而这是**可预期的运营状态**，不是 bug —— 所以在这里翻译成一句能行动的话。
  */
-export async function createTrip(title: string, options?: TripsApiOptions): Promise<TripView> {
+export async function createTrip(
+  title: string,
+  options?: CreateTripOptions,
+): Promise<TripView> {
   const url = `${resolveBaseUrl(options)}/api/v1/trips`;
   let response: Response;
   try {
     response = await resolveFetch(options)(url, {
       method: 'POST',
       headers: jsonHeaders(),
-      body: JSON.stringify({ title }),
+      // `started_on` 只在导入 journey 包时出现：它是包里的 `days[0].date`，
+      // 不是用户手填的。手工新建传 undefined，后端按 null 处理（"还不知道"）。
+      body: JSON.stringify(
+        options?.startedOn ? { title, started_on: options.startedOn } : { title },
+      ),
     });
   } catch (err) {
     throw new Error(`新建旅程失败：网络请求异常（${describeError(err)}）`);
