@@ -127,8 +127,8 @@ export function VerifyCard({ cred, externalResult, onVerified }: VerifyCardProps
           }}
           className={
             dragging
-              ? 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-primary bg-accent/70 px-6 py-8 text-center transition-colors'
-              : 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-border bg-muted/30 px-6 py-8 text-center transition-colors hover:border-primary/60 hover:bg-accent/60'
+              ? 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-primary bg-accent/15 px-6 py-8 text-center transition-colors'
+              : 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-border bg-muted/30 px-6 py-8 text-center transition-colors hover:border-primary/60 hover:bg-accent/10'
           }
         >
           <Upload className={dragging ? 'mb-1 h-6 w-6 text-primary' : 'mb-1 h-6 w-6 text-muted-foreground'} />

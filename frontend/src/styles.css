@@ -38,8 +38,12 @@
   --secondary: 60 5% 95%;
   --secondary-foreground: 48 8% 20%;
 
-  --muted: 52 3% 47%;
-  --muted-foreground: 48 4% 42%;
+  /* `--muted` 是**表面色**（`bg-muted`），文字色是 `--muted-foreground`。
+   * 旧值 `52 3% 47%` 是深灰，被 `bg-muted` 当背景用时，badge 变成"灰底深灰字"
+   * （实测对比度 1.19:1，肉眼就是黑底黑字）。这里按 shadcn 语义改回浅表面色，
+   * 旧代码里把它当文字色的 7 处已同步改成 `--muted-foreground`。 */
+  --muted: 48 10% 93%;
+  --muted-foreground: 48 4% 40%;
 
   --accent: 164 41% 31%;
   --accent-foreground: 0 0% 100%;
@@ -55,6 +59,63 @@
 
   font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   color-scheme: light;
+}
+
+/* ── 深色主题（阶段 17 续：主题切换）──────────────────────────
+ *
+ * 只覆盖 token，不写 `dark:` 变体 —— tailwind.config 里是 `darkMode: ['class']`，
+ * 组件全部用 `bg-background` / `text-foreground` / `border-border` 这类语义类，
+ * 所以 `<html class="dark">` 一挂，对话框、抽屉、按钮、输入框一起变色。
+ *
+ * 两套遗留变量 `--bg/--panel/--text` 必须一起覆盖：`styles.css` 里地图占位、
+ * 分享页、旧对话页用的是 hex 原色，不覆盖就会出现"深色壳 + 白卡片"。
+ *
+ * 刻意**不覆盖** `.replay-root`：轨迹回放本身就是固定深色舞台（见文件末尾注释），
+ * 它不引用这些 token。
+ */
+.dark {
+  --bg: #0f1316;
+  --panel: #171d21;
+  --text: #e7ecef;
+  --user: #3f8d78;
+  --danger: #e07364;
+
+  --background: 200 12% 7%;
+  --foreground: 200 8% 92%;
+
+  --card: 200 12% 10%;
+  --card-foreground: 200 8% 92%;
+
+  --popover: 200 12% 10%;
+  --popover-foreground: 200 8% 92%;
+
+  --primary: 164 45% 55%;
+  --primary-foreground: 200 30% 8%;
+
+  --secondary: 200 10% 16%;
+  --secondary-foreground: 200 8% 92%;
+
+  --muted: 200 8% 17%;
+  --muted-foreground: 200 6% 68%;
+
+  /* hover 表面色：比浅色主题的 31% 亮一档，但压到 38% —— 白字（accent-foreground）
+   * 压在它上面仍有 4.6:1；42% 时只剩 3.9:1，12px 的 hover 文案会不达标。 */
+  --accent: 164 32% 38%;
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 6 55% 52%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 200 8% 22%;
+  --input: 200 8% 26%;
+  --ring: 164 45% 60%;
+
+  color-scheme: dark;
+}
+
+/* html 也要上色：body 只盖内容区，滚动回弹时会露出浏览器默认白底 */
+html {
+  background: var(--bg);
 }
 
 * {
@@ -83,7 +144,7 @@ body {
 
 .agent-header .hint,
 .empty {
-  color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
   font-size: 13px;
   margin: 0;
 }
@@ -159,7 +220,7 @@ body {
 }
 
 .chip-label {
-  color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .chip {
@@ -174,7 +235,7 @@ body {
   display: flex;
   gap: 10px;
   font-size: 12px;
-  color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .meta-row .refused {
@@ -345,7 +406,7 @@ body {
   background: var(--panel);
   border: 1px solid hsl(var(--border));
   font-size: 12px;
-  color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .map-empty-hint {
@@ -377,7 +438,7 @@ body {
   max-width: 420px;
   font-size: 13px;
   line-height: 1.6;
-  color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .map-fallback .hint {
@@ -436,7 +497,7 @@ body {
 
 .identity-card code {
   font-size: 12px;
-  color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .gen-message {
@@ -464,7 +525,7 @@ body {
 .place-geo,
 .place-photos {
   font-size: 12px;
-  color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .place-geo {

@@ -16,8 +16,9 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: 'border-border bg-muted/40 text-foreground',
-        info: 'border-sky-300 bg-sky-50 text-sky-900',
-        success: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+        info: 'border-sky-300 bg-sky-50 text-sky-900 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200',
+        success:
+          'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
         /** 破坏性后果专用。用红底 + 加粗标题，让"不可逆"这件事在视觉上先于文字被感知。 */
         destructive: 'border-destructive/40 bg-destructive/10 text-destructive',
       },

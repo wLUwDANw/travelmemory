@@ -64,28 +64,44 @@ export function ChatPanel({ onLocate }: ChatPanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* 头部：新对话 + 历史记录。历史用嵌套 Sheet 会互相抢遮罩层级，
-          所以这里做成面板内的内联列表切换，不叠第二层。 */}
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          所以这里做成面板内的内联列表切换，不叠第二层。
+
+          `pr-14` 是给 Sheet 自带的关闭按钮留的：它绝对定位在 `right-3`、宽 32px，
+          不预留就会压住最右边的「新对话」。窄屏（<640）把两个按钮收成图标，
+          让标题和两个 36px 图标在 345px 宽的抽屉里也放得下。 */}
+      <div className="flex items-center justify-between gap-2 border-b py-3 pl-4 pr-14">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Sparkles className="h-4 w-4" />
           </span>
-          <span className="text-sm font-semibold">旅忆助手</span>
-          <Badge variant="muted">本地检索</Badge>
+          <span className="truncate text-sm font-semibold">旅忆助手</span>
+          <Badge variant="muted" className="hidden shrink-0 sm:inline-flex">
+            本地检索
+          </Badge>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
+            className="px-2 sm:px-3"
             onClick={() => setHistoryOpen((v) => !v)}
             aria-expanded={historyOpen}
+            title="历史记录"
+            aria-label="历史记录"
           >
             <History className="h-4 w-4" />
-            历史记录
+            <span className="hidden sm:inline">历史</span>
           </Button>
-          <Button variant="ghost" size="sm" onClick={reset} title="开一轮新对话（不清历史）">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-2 sm:px-3"
+            onClick={reset}
+            title="开一轮新对话（不清历史）"
+            aria-label="新对话"
+          >
             <RotateCcw className="h-4 w-4" />
-            新对话
+            <span className="hidden sm:inline">新对话</span>
           </Button>
         </div>
       </div>
@@ -100,7 +116,7 @@ export function ChatPanel({ onLocate }: ChatPanelProps) {
                 <li key={item.id} className="flex items-center gap-2">
                   <button
                     type="button"
-                    className="flex-1 truncate rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                    className="flex-1 truncate rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
                     onClick={() => {
                       openConversation(item.id);
                       setHistoryOpen(false);

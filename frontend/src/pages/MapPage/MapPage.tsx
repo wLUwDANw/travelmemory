@@ -52,6 +52,7 @@ import type { StudioMode } from '../../services/studio-bridge/types';
 import type { UnpackedPlace } from '../../types/share';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
+import { ThemeToggle } from '../../components/ThemeToggle';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../../components/ui/sheet';
 import { toast } from '../../components/ui/use-toast';
 import { findPointForEvidence } from '../../lib/mapView';
@@ -286,6 +287,11 @@ export function MapPage({
         </p>
       </div>
 
+      {/* 右上角：主题切换。选这里是因为它是**唯一没被占用的角** ——
+          左上品牌、左下工具栏、右下 AI FAB、右缘抽屉 Tab 都在别处，
+          放进来不会和任何既有按钮重叠。 */}
+      <ThemeToggle className="absolute right-4 top-4 z-20" />
+
       {/* 右缘半圆形 Tab：抽屉触发器。文字竖排，收起时只占 ~28px。 */}
       <button
         type="button"
@@ -373,8 +379,10 @@ export function MapPage({
       />
 
       {/* 底部常驻计数：让用户随时知道地图上有多少点。
-          放在底部中间而不是角落，是为了不和左右两个浮层抢位置。 */}
-      <div className="pointer-events-none absolute bottom-6 left-1/2 z-0 -translate-x-1/2">
+          放在底部中间而不是角落，是为了不和左右两个浮层抢位置。
+          窄屏（<640）隐藏：左下角那行"模糊圈半径是承诺半径"会铺到屏幕中间，
+          两个都留着就会叠在一起 —— 承诺优先，计数让位。 */}
+      <div className="pointer-events-none absolute bottom-6 left-1/2 z-0 hidden -translate-x-1/2 sm:block">
         <div className="flex items-center gap-2 rounded-full border bg-background/85 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
           <Route className="h-3 w-3" />
           <span>
