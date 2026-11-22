@@ -146,6 +146,11 @@ export const Timeline = forwardRef<TimelineHandle, TimelineProps>(function Timel
       ctx.save();
       ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
       ctx.textBaseline = 'alphabetic';
+      /* 标签防重叠（阶段 17）：`MM.DD` 在 10px 等宽下约 30px 宽，
+       * 相邻两天靠得近时会印成「07.12 07.13 07.14」叠字 —— 窄屏（≤600px）尤其明显。
+       * 这里不量文本（`measureText` 会让每帧多一次字体上下文查询，且 jsdom 的
+       * canvas 桩没有这个方法），用一个保守的固定步距：不到 38px 就不画后一个。 */
+      let lastLabelX = Number.NEGATIVE_INFINITY;
       for (let i = 0; i < journey.days.length; i += 1) {
         const day = journey.days[i];
         const x = PAD + usable * Math.min(1, Math.max(0, day.startS / total));
@@ -156,7 +161,10 @@ export const Timeline = forwardRef<TimelineHandle, TimelineProps>(function Timel
         ctx.lineTo(x, TRACK_Y + 6);
         ctx.stroke();
         ctx.fillStyle = 'rgba(124,142,166,0.85)';
-        ctx.fillText(day.label, x + 4, TRACK_Y - 11);
+        if (x - lastLabelX >= 38) {
+          ctx.fillText(day.label, x + 4, TRACK_Y - 11);
+          lastLabelX = x;
+        }
       }
       ctx.restore();
 

@@ -39,7 +39,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SystemPhoto } from '@travelmemory/photo-source';
 import { gcj02ToWgs84 } from '@travelmemory/geo';
 
-import { createBaseMap, type CoordinateSystem, type MapController } from '../map/baseMap';
+import { createBaseMap, type MapController } from '../map/baseMap';
 import { placeNameFromFileName } from '../../core/photoImport';
 import {
   initialViewOf,
@@ -82,7 +82,9 @@ export function LocationEditor({ photos, onApply, onExit }: LocationEditorProps)
   /** 最近一次点选的坐标（WGS84），只用于底部读数。 */
   const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
   const [dot, setDot] = useState<DotPosition | null>(null);
-  const [coordinateSystem, setCoordinateSystem] = useState<CoordinateSystem>('wgs84');
+  /** 底图实际类型（阶段 17）：无 Key 时明说"现在是示意格网"，
+   *  而不是让用户对着一片空白网格猜"地图是不是挂了"。`null` = 还在初始化。 */
+  const [mapKind, setMapKind] = useState<'amap' | 'fallback' | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
 
   // 地图的点击回调在挂载时注册一次，读不到最新的 state，所以用 ref 透传。
@@ -154,7 +156,7 @@ export function LocationEditor({ photos, onApply, onExit }: LocationEditorProps)
         return;
       }
       controller = ctrl;
-      setCoordinateSystem(ctrl.coordinateSystem);
+      setMapKind(ctrl.kind);
       ctrl.onClick((lng, lat) => {
         // 高德给 GCJ-02，存储要 WGS84；降级底图本来就是 WGS84，直接写
         const wgs = ctrl.coordinateSystem === 'gcj02' ? gcj02ToWgs84(lng, lat) : { lng, lat };
@@ -189,6 +191,21 @@ export function LocationEditor({ photos, onApply, onExit }: LocationEditorProps)
 
   const activeItem = items.find((item) => item.photoId === selectedId) ?? null;
   const locatedCount = photos.length - items.length;
+
+  /**
+   * 右下角那一条的文案（阶段 17）。
+   *
+   * 之前只有「高德底图 · 已把 GCJ-02 转回 WGS84」一种，降级格网时什么都不显示 ——
+   * 没配 Key 的用户会以为地图坏了。现在把"当前是什么底图"作为第一优先级，
+   * 降级时同时给出"仍可点击"的保证；坐标系说明只在真用高德时才出现。
+   */
+  const mapNote =
+    mapKind === 'fallback'
+      ? '示意格网（未配置地图 Key 或底图加载失败）· 点击取点照常可用'
+      : mapKind === 'amap'
+        ? '高德底图 · 已把 GCJ-02 转回 WGS84 存储'
+        : null;
+  const mapNoteIsWarning = mapKind === 'fallback';
 
   return (
     <div className="location-editor">
@@ -255,15 +272,23 @@ export function LocationEditor({ photos, onApply, onExit }: LocationEditorProps)
               aria-hidden="true"
             />
           ) : null}
-          <p className="location-editor-readout">
+          <p className="location-editor-readout" aria-live="polite">
             {picked
               ? `已选：${picked.lat.toFixed(5)}, ${picked.lng.toFixed(5)}（WGS84）`
               : activeItem
                 ? `正在为「${placeNameFromFileName(activeItem.name)}」选点`
                 : '点地图选择位置'}
           </p>
-          {coordinateSystem === 'gcj02' ? (
-            <p className="location-editor-note">高德底图 · 已把 GCJ-02 转回 WGS84 存储</p>
+          {mapNote ? (
+            <p
+              className={
+                mapNoteIsWarning
+                  ? 'location-editor-note location-editor-note-warn'
+                  : 'location-editor-note'
+              }
+            >
+              {mapNote}
+            </p>
           ) : null}
           {mapError ? <p className="location-editor-note location-editor-note-error">{mapError}</p> : null}
         </div>

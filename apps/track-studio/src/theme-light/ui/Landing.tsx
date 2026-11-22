@@ -85,13 +85,26 @@ export function Landing(props: LandingProps): JSX.Element {
             这里按"最小改动 + 保留能力"处理。 */}
       </div>
 
+      {/* 无地图 Key 的降级说明（阶段 17）。
+          之前是一行 `.hint`，在 720px 宽的首屏里几乎等于脚注；而"底图长什么样"
+          恰恰是用户点进播放页之前最想知道的事。改成三段式提示条：
+          说清「会退化成什么」「哪些能力不受影响」「怎么恢复」。 */}
       {!hasAmapKey ? (
-        <p className="hint">
-          底图需要配置地图服务；轨迹与播放不受影响（会自动切换为示意格网）。
-        </p>
+        <div className="notice notice-warn" role="status">
+          <p className="notice-title">未配置地图 Key：底图会退化成示意格网</p>
+          <p className="notice-body">
+            轨迹、播放、导出视频都不受影响，只是没有真实街道底图。
+            想用高德底图，在仓库根目录的 <code>.env</code> 里配置{' '}
+            <code>VITE_AMAP_JS_KEY</code> 后重启开发服务。
+          </p>
+        </div>
       ) : null}
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      ) : null}
 
       <div className="identity">
         {identity ? (

@@ -252,12 +252,26 @@ export function SetupPanel(props: SetupPanelProps): JSX.Element {
 
         <div className="photo-grid">
           {sorted.length === 0 ? (
-            <div className="setup-hint" style={{ gridColumn: '1 / -1' }}>
-              把照片拖到首页，或者点「添加照片」。
-              <br />
-              <br />
-              会自动读取 EXIF 里的 <b>GPS</b> 与<b>拍摄时间</b>。GPS 被平台抹掉的情况会标成
-              「待定位」，选中后在地图上点一下即可 —— 我们**不会**给没有坐标的照片编一个位置。
+            /* 空状态（阶段 17）：与浅色版同一套 `.empty` 结构（标题 / 说明 / 动作）。
+               原实现是一段 `.setup-hint` 文本，没有可点的出路；这里把「添加照片」
+               这颗按钮放进空状态里 —— 空白页上唯一该做的事就是补数据。 */
+            <div className="empty" style={{ gridColumn: '1 / -1' }}>
+              <div className="empty-title">还没有照片</div>
+              <div className="empty-body">
+                把照片拖到首页，或点下面的「添加照片」。会自动读取 EXIF 里的 <b>GPS</b> 与
+                <b>拍摄时间</b>；GPS 被平台抹掉的照片会标成「待定位」，选中后在地图上点一下即可
+                —— 我们<b>不会</b>给没有坐标的照片编一个位置。
+              </div>
+              <div className="empty-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={props.onAddPhotos}
+                >
+                  添加照片
+                </button>
+              </div>
             </div>
           ) : (
             sorted.map((photo) => {
@@ -357,8 +371,7 @@ export function SetupPanel(props: SetupPanelProps): JSX.Element {
 
       <div className="setup-map">
         <div className="topbar-note">
-          底图是本地省界轮廓（可拖拽 / 滚轮缩放 / 点击取点）·
-          数据在应用内，全程不联网
+          底图是本地省界轮廓（不是在线地图）· 可拖拽 / 滚轮缩放 / 点击取点 · 全程不联网
         </div>
         <div className="map-canvas-host" ref={hostRef} />
         <div className="map-hint panel">
