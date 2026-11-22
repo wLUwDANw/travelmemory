@@ -55,8 +55,31 @@ describe('SharePage 读到导入出来的行程', () => {
     const moduleId = ['node', 'crypto'].join(':');
     const { webcrypto } = (await import(/* @vite-ignore */ moduleId)) as { webcrypto: Crypto };
     Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
-    (URL as unknown as { createObjectURL: () => string }).createObjectURL = () => 'blob:mock';
+
+    /**
+     * 成功信号用「真的触发了下载」而不是 toast 文案。
+     *
+     * toast 只有 5 秒寿命；CI 上第一次失败时，等待器在 40 秒后只报
+     * 「找不到 信物已生成」，真正的异常早随 toast 一起消失了。
+     * `downloadShareFile` 一定会先调 `URL.createObjectURL(blob)`，
+     * 所以在这里把 blob 截下来 —— 它同时也是「打包真的产出了文件」的证据。
+     */
+    let downloaded: Blob | null = null;
+    (URL as unknown as { createObjectURL: (blob: Blob) => string }).createObjectURL = (blob: Blob) => {
+      downloaded = blob;
+      return 'blob:mock';
+    };
     (URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = () => {};
+
+    /** 同上：失败 toast 也会在 5 秒后消失，用观察器把文案留到超时之后。 */
+    let failureText = '';
+    const observer = new MutationObserver(() => {
+      if (failureText) return;
+      const text = document.body.textContent ?? '';
+      const at = text.indexOf('生成失败');
+      if (at >= 0) failureText = text.slice(at, at + 800);
+    });
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true });
 
     vi.stubGlobal('fetch', (async (url: string) => {
       if (String(url).includes('/privacy/obfuscate')) {
@@ -87,14 +110,19 @@ describe('SharePage 读到导入出来的行程', () => {
     expect(screen.getByText('我导入的照片')).toBeTruthy();
 
     fireEvent.click(screen.getByText('生成并下载 .trailshare'));
-    await waitFor(
-      () => {
-        const err = screen.queryAllByText('生成失败');
-        if (err.length > 0) throw new Error('生成失败：' + document.body.textContent?.slice(0, 2000));
-        expect(screen.getAllByText('信物已生成').length).toBeGreaterThan(0);
-      },
-      { timeout: 40000 },
-    );
+    try {
+      await waitFor(
+        () => {
+          // 失败 toast 会消失，但文案已经被观察器留下；这里抛它才能让 CI 看到真正原因
+          if (failureText) throw new Error(`打包失败：${failureText}`);
+          expect(downloaded, '还没有触发下载（生成没有走完）').not.toBeNull();
+        },
+        { timeout: 40000 },
+      );
+    } finally {
+      observer.disconnect();
+    }
+    expect(screen.getAllByText('信物已生成').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/t-real|我的洛阳行/).length).toBeGreaterThan(0);
 
     // 也能切回内置示例
