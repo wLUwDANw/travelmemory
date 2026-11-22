@@ -54,7 +54,68 @@ describe('SharePage 读到导入出来的行程', () => {
     // "Cannot find module 'node:crypto'"。运行时照常拿到 Node 的 webcrypto。
     const moduleId = ['node', 'crypto'].join(':');
     const { webcrypto } = (await import(/* @vite-ignore */ moduleId)) as { webcrypto: Crypto };
-    Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
+    const bufferModuleId = ['node', 'buffer'].join(':');
+    const { Buffer: NodeBuffer } = (await import(/* @vite-ignore */ bufferModuleId)) as {
+      Buffer: { from(values: number[]): Uint8Array };
+    };
+
+    /**
+     * Node 20 的 WebCrypto 用 `instanceof` 判 BufferSource：jsdom realm 里
+     * `new ArrayBuffer(...)` 出来的对象不是 Node 的实例，`importKey` 会直接抛
+     * "2nd argument is not instance of ArrayBuffer, Buffer, TypedArray, or DataView"。
+     * Node 24 的判型更宽松，所以这条测试**本地绿、CI 红**。
+     *
+     * 产品代码只跑在单 realm（浏览器），不需要这层；这里做的是**测试边界**适配：
+     * 把入参拷成 Node 的 Buffer，Node 20 / 24 都认。
+     */
+    const toNodeBytes = (value: unknown): unknown => {
+      const bytes =
+        value instanceof ArrayBuffer
+          ? new Uint8Array(value)
+          : ArrayBuffer.isView(value)
+            ? new Uint8Array(value.buffer as ArrayBuffer, value.byteOffset, value.byteLength)
+            : null;
+      return bytes === null ? value : NodeBuffer.from(Array.from(bytes));
+    };
+
+    /** 只替换算法对象里的 `iv`；CryptoKey / 布尔 / usages 数组原样传。 */
+    const wrapSubtle = (subtle: SubtleCrypto): SubtleCrypto =>
+      new Proxy(subtle, {
+        get(target, key) {
+          const original = Reflect.get(target, key) as unknown;
+          if (typeof original !== 'function') return original;
+          return (...args: unknown[]) => {
+            const mapped = args.map((arg) => {
+              if (arg !== null && typeof arg === 'object' && 'iv' in arg) {
+                const copy = { ...(arg as Record<string, unknown>) };
+                copy.iv = toNodeBytes((arg as { iv: unknown }).iv);
+                return copy;
+              }
+              return toNodeBytes(arg);
+            });
+            return (original as (...inner: unknown[]) => unknown).apply(target, mapped);
+          };
+        },
+      }) as SubtleCrypto;
+
+    /**
+     * `getRandomValues` 同样做一层：jsdom 的 Uint8Array 在 Node 20 上也可能被判型拒绝。
+     * 让 Node 先填自己的数组，再拷回调用方的视图。
+     */
+    const bridgeCrypto = {
+      subtle: wrapSubtle(webcrypto.subtle),
+      getRandomValues<T extends ArrayBufferView>(out: T): T {
+        const temp = new Uint8Array(out.byteLength);
+        webcrypto.getRandomValues(temp);
+        new Uint8Array(out.buffer as ArrayBuffer, out.byteOffset, out.byteLength).set(temp);
+        return out;
+      },
+      ...(typeof webcrypto.randomUUID === 'function'
+        ? { randomUUID: webcrypto.randomUUID.bind(webcrypto) }
+        : {}),
+    } as unknown as Crypto;
+
+    Object.defineProperty(globalThis, 'crypto', { value: bridgeCrypto, configurable: true });
 
     /**
      * 成功信号用「真的触发了下载」而不是 toast 文案。
