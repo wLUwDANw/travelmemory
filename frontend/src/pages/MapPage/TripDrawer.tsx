@@ -181,7 +181,7 @@ export function TripDrawer({
           className={`rounded-lg border px-3 py-2 transition-all duration-150 ${
             active
               ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/30'
-              : 'hover:bg-accent/60 hover:shadow-sm'
+              : 'hover:bg-accent/10 hover:shadow-sm'
           }`}
         >
           <div className="flex items-center justify-between gap-2">
@@ -422,7 +422,7 @@ export function TripDrawer({
             className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
               tab === item.key
                 ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
             }`}
           >
             <item.icon className="h-3.5 w-3.5" />
@@ -462,7 +462,7 @@ export function TripDrawer({
                   className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                     scope === item.key
                       ? 'bg-primary/10 text-primary'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                   }`}
                 >
                   {item.label}
@@ -509,7 +509,7 @@ export function TripDrawer({
                     <div key={group.sender} className="rounded-lg border">
                       <button
                         type="button"
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-accent/60"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-accent/10"
                         aria-expanded={expanded}
                         onClick={() => toggleSender(group.sender)}
                       >
@@ -624,7 +624,7 @@ export function TripDrawer({
                       <li
                         key={photo.id}
                         className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors ${
-                          isChecked ? 'border-primary bg-primary/5' : 'hover:bg-accent/60'
+                          isChecked ? 'border-primary bg-primary/5' : 'hover:bg-accent/10'
                         }`}
                       >
                         <Checkbox

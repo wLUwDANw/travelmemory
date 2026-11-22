@@ -335,21 +335,26 @@ function ThemeLightApp(): JSX.Element {
   }
 
   if (mode === 'play') {
-    // 走到这里只可能是"带位置的照片不足 2 张"，buildJourney 没有轨迹
+    // 走到这里只可能是"带位置的照片不足 2 张"，buildJourney 没有轨迹。
+    // 与深色版那段 `modal` 说同一件事：还差几张、去哪补、补完就好。
     return (
       <div className="panel">
         <header className="panel-head">
           <div>
             <h1>还差一点</h1>
-            <p className="lead">
-              这条轨迹至少需要 2 张带位置信息的照片。回去多选几张，或用「演示路线体验」看看效果。
-            </p>
+            <p className="lead">这条轨迹至少需要 2 张带位置的照片。</p>
           </div>
         </header>
-        <div className="panel-foot">
-          <button type="button" className="btn btn-primary" onClick={handleBackToEdit}>
-            返回调整
-          </button>
+        <div className="empty">
+          <p className="empty-title">现在只有 {locatedCount} 张带位置</p>
+          <p className="empty-body">
+            回到上一页多选几张带 GPS 的照片，或用「补全位置」选中照片后在地图上点一下补个地点。
+          </p>
+          <div className="empty-actions">
+            <button type="button" className="btn btn-primary" onClick={handleBackToEdit}>
+              返回调整
+            </button>
+          </div>
         </div>
       </div>
     );

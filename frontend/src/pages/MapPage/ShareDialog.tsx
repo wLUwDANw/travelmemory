@@ -50,7 +50,13 @@ export function ShareDialog({ open, onOpenChange, trips, onViewOnMap, section }:
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col gap-0 p-0">
+      {/* 高度必须**明确**（h-[85vh]），不能只给 max-h：
+          滚动区用的是 Radix ScrollArea，它的 Viewport 靠 `h-full`（height:100%）撑开；
+          父级只有 max-height 时，百分比高度会被当成 auto，Viewport 就取内容高度（实测 2316px），
+          自身永远不需要滚动，外层 `overflow-hidden` 直接把下半截裁掉 —— 这就是"窗口滑不动"。
+          另外 `scrollIntoView` 会把唯一可滚的祖先（这个 overflow-hidden 的 Root）滚走，
+          顶部内容因此还会被顶出可视区。给 DialogContent 一个确定高度后两者都消失。 */}
+      <DialogContent className="flex h-[85vh] max-w-2xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="border-b px-6 py-4">
           <DialogTitle>信物分享</DialogTitle>
           <DialogDescription>

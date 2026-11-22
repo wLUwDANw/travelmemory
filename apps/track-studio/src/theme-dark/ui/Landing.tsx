@@ -119,7 +119,11 @@ export function Landing({
           </div>
         ) : null}
 
-        {error ? <p className="setup-hint">{error}</p> : null}
+        {error ? (
+          <p className="setup-hint setup-hint-error" role="alert">
+            {error}
+          </p>
+        ) : null}
 
         <div className="drop-hint">也可以直接把照片拖进这个页面</div>
       </div>

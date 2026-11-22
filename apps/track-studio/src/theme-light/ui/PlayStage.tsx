@@ -72,6 +72,18 @@ const HEAD_RADIUS = 4.5;
 /** 站点圆点半径（px）。 */
 const STOP_RADIUS = 2.4;
 
+/** 会让进度条改值的按键（拖动/键盘共用同一套"暂停—恢复"逻辑）。 */
+const SEEK_KEYS = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+]);
+
 /** 一帧要画的全部输入。字段刻意与内核 `DrawState` 同名，便于对照阅读。 */
 export interface LightFrame {
   scene: Scene;
@@ -263,6 +275,8 @@ export function PlayStage({ journey, onBack, onExported }: PlayStageProps): JSX.
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rangeRef = useRef<HTMLInputElement>(null);
+  /** 进度百分比读数（与进度条同帧更新，见主循环里的注释）。 */
+  const percentRef = useRef<HTMLSpanElement>(null);
   const resumeRef = useRef(false);
   const exportResolveRef = useRef<(() => void) | null>(null);
 
@@ -342,6 +356,8 @@ export function PlayStage({ journey, onBack, onExported }: PlayStageProps): JSX.
     let disposed = false;
     let raf = 0;
     let frameCount = 0;
+    /** 上一次写进 DOM 的整数百分比（-1 = 还没写过）。 */
+    let lastPercent = -1;
     let lastCenterAt = 0;
     let started = false;
     let revealTimer = 0;
@@ -479,9 +495,20 @@ export function PlayStage({ journey, onBack, onExported }: PlayStageProps): JSX.
       frameData.dpr = renderer.dpr;
       drawLightFrame(ctx2d, frameData);
 
-      // 进度条直接写 DOM：60fps 的 setState 会把主线程吃掉
+      // 进度条直接写 DOM：60fps 的 setState 会把主线程吃掉。
+      // 除了 value，再写两个"看得见的进度"：CSS 变量（填充条）与百分比读数。
+      // 文本与 aria 只在整数百分比变化时写，避免每帧碰文本节点。
+      const percent = Math.round(clock.q * 100);
       const range = rangeRef.current;
-      if (range) range.value = String(Math.round(clock.q * 1000));
+      if (range) {
+        range.value = String(Math.round(clock.q * 1000));
+        range.style.setProperty('--seek-progress', `${(clock.q * 100).toFixed(2)}%`);
+        if (percent !== lastPercent) range.setAttribute('aria-valuetext', `${percent}%`);
+      }
+      if (percent !== lastPercent) {
+        lastPercent = percent;
+        if (percentRef.current) percentRef.current.textContent = `${percent}%`;
+      }
 
       // 导出录制：播放到底后 resolve 宿主的 play()
       const resolve = exportResolveRef.current;
@@ -494,7 +521,31 @@ export function PlayStage({ journey, onBack, onExported }: PlayStageProps): JSX.
     raf = window.requestAnimationFrame(frame);
     window.addEventListener('resize', syncSize);
 
+    /**
+     * 全局快捷键只在「焦点不在控件上」时生效。
+     *
+     * 否则键盘用户会撞上双重动作，最典型的两处：
+     *  - 焦点在「播放」按钮上按空格：按钮的 click 先 toggle 一次，window 上的监听
+     *    再 toggle 一次 —— 等于没按，而且看起来像"空格坏了"；
+     *  - 焦点在进度条上按 ←/→：range 原生走一步，这里再 seek 0.01 —— 一次跳两倍。
+     * 按钮、range、链接本来就有原生键盘行为，交给它们自己处理。
+     */
+    const isFormControl = (target: EventTarget | null): boolean => {
+      const element = target as HTMLElement | null;
+      if (!element) return false;
+      const tag = element.tagName;
+      return (
+        tag === 'BUTTON' ||
+        tag === 'INPUT' ||
+        tag === 'SELECT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'A' ||
+        element.isContentEditable
+      );
+    };
+
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (isFormControl(event.target)) return;
       if (event.code === 'Space') {
         event.preventDefault();
         clock.toggle();
@@ -600,13 +651,30 @@ export function PlayStage({ journey, onBack, onExported }: PlayStageProps): JSX.
       </div>
 
       {fallback ? (
-        <div className="stage-note">底图未加载，已切换示意格网（轨迹与播放不受影响）</div>
+        // 降级提示（阶段 17 补全）：说清「为什么」而不只是「是什么」。
+        // 无 Key 与加载超时走的是同一条降级路径，文案必须同时覆盖，否则用户会去查错的配置。
+        <div className="stage-note" role="status">
+          底图未加载，已切换示意格网：可能没有配置地图 Key，或底图加载超时。轨迹、播放与导出都不受影响。
+        </div>
       ) : null}
-      {error ? <div className="stage-note stage-note-error">{error}</div> : null}
-      {notice ? <div className="stage-note">{notice}</div> : null}
+      {error ? (
+        <div className="stage-note stage-note-error" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="stage-note" role="status">
+          {notice}
+        </div>
+      ) : null}
 
-      <div className="stage-controls">
-        <button type="button" className="btn btn-primary" onClick={handleToggle}>
+      <div className="stage-controls" role="group" aria-label="播放控制">
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={handleToggle}
+          title={playing ? '暂停（空格）' : '播放（空格）'}
+        >
           {playing ? '暂停' : '播放'}
         </button>
 
@@ -619,12 +687,24 @@ export function PlayStage({ journey, onBack, onExported }: PlayStageProps): JSX.
           step={1}
           defaultValue={0}
           aria-label="播放进度"
+          aria-valuetext="0%"
           onPointerDown={handleSeekStart}
           onPointerUp={handleSeekEnd}
-          onKeyDown={handleSeekStart}
-          onKeyUp={handleSeekEnd}
+          /* 只在"真的会改值"的按键上暂停：Tab 离开进度条时不该顺手把播放停掉。
+             方向键 / Home / End 的真实 seek 由 range 原生行为 + onChange 完成。 */
+          onKeyDown={(event) => {
+            if (SEEK_KEYS.has(event.key)) handleSeekStart();
+          }}
+          onKeyUp={(event) => {
+            if (SEEK_KEYS.has(event.key)) handleSeekEnd();
+          }}
           onChange={(event) => clock.seek(Number(event.target.value) / 1000)}
         />
+
+        {/* 读数与进度条同步（主循环写 textContent），给"拖到哪了"一个精确答案。 */}
+        <span className="seek-value" ref={percentRef} aria-hidden="true">
+          0%
+        </span>
 
         <div className="speeds" role="group" aria-label="播放倍速">
           {[1, 2, 4].map((item) => (
@@ -632,6 +712,8 @@ export function PlayStage({ journey, onBack, onExported }: PlayStageProps): JSX.
               key={item}
               type="button"
               className={item === speed ? 'btn btn-tiny is-active' : 'btn btn-tiny'}
+              aria-pressed={item === speed}
+              title={`${item} 倍速`}
               onClick={() => handleSpeed(item)}
             >
               {item}x
@@ -639,10 +721,21 @@ export function PlayStage({ journey, onBack, onExported }: PlayStageProps): JSX.
           ))}
         </div>
 
-        <button type="button" className="btn btn-primary" disabled={exporting} onClick={handleExport}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={exporting}
+          onClick={handleExport}
+          title="按当前倍速重新播放一遍并录成 WebM"
+        >
           {exporting ? `录制中 ${Math.round(progress * 100)}%` : '导出视频'}
         </button>
       </div>
+
+      {/* 键盘操作说明：不占布局宽度，窄屏隐藏（触屏用户用不到）。 */}
+      <p className="stage-keys" aria-hidden="true">
+        空格 播放/暂停 · ← → 微调 · Home 回到开头
+      </p>
     </div>
   );
 }

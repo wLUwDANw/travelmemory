@@ -130,10 +130,13 @@
   border-radius: 7px;
 }
 
+/* 选中态：浅底上必须用深字。09-17 之前这里写的是 `color: #eaf7ff`（给深色底准备的），
+ * 浅色化后等于「浅字压浅底」，对比度不足 1.5:1，2x/4x 哪个被选中几乎看不出来。 */
 .theme-light .btn-tiny.is-active {
   border-color: var(--accent);
-  color: #eaf7ff;
+  color: var(--accent);
   background: var(--accent-soft);
+  font-weight: 600;
 }
 
 /* ── 首屏 ─────────────────────────────────────────────────── */
@@ -248,7 +251,6 @@
 .theme-light .privacy-how summary {
   cursor: pointer;
   color: var(--accent);
-  outline: none;
 }
 
 .theme-light .privacy-how ol {
@@ -275,6 +277,8 @@
 .theme-light .panel-foot {
   margin-top: 26px;
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -295,6 +299,14 @@
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
   background: rgba(10, 16, 25, 0.8);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+/* 卡片悬停：与深色版 `.photo-cell:hover` / `.demo-card:hover` 同一个反馈语言
+ * （只提亮边界，不做位移 —— 列表项上下移动会让"移除"按钮在指针下跳走）。 */
+.theme-light .photo-item:hover {
+  border-color: #c3d3e4;
+  background: #fbfdff;
 }
 
 .theme-light .photo-thumb {
@@ -474,15 +486,42 @@
   max-width: min(760px, calc(100vw - 32px));
 }
 
+/* 控制条上的按钮不许被挤成两行：`暂停` / `导出视频` 在 1280 宽下也曾被压成
+ * 竖排两个汉字（flex 收缩 + 没有 nowrap）。进度条负责伸缩，按钮保持自身宽度。 */
+.theme-light .stage-controls .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .theme-light .seek {
   appearance: none;
   flex: 1 1 240px;
   min-width: 120px;
   height: 4px;
   border-radius: 999px;
-  /* 未走部分原本收在 #1e4964（深海蓝），浅底上要收在浅钢蓝 */
-  background: linear-gradient(90deg, var(--accent), #b9d3e6);
-  outline: none;
+  /* 进度用变量画：`--seek-progress` 由 PlayStage 每帧写入（60fps 只改一个自定义属性，
+   * 不触发 React 重渲染）。回退值 0% 保证 SSR / 首帧不会出现整条"已走完"的假象。 */
+  --seek-progress: 0%;
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0 var(--seek-progress),
+    #d7e3ef var(--seek-progress) 100%
+  );
+  /* 09-17 之前这里是 `outline: none`：键盘 Tab 到进度条后完全看不出焦点在哪。
+   * 去掉它，焦点环由下面的 :focus-visible 统一给。 */
+}
+
+.theme-light .seek:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 8px;
+}
+
+.theme-light .seek:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px var(--accent-soft);
+}
+
+.theme-light .seek:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 5px var(--accent-soft);
 }
 
 .theme-light .seek::-webkit-slider-thumb {
@@ -517,15 +556,6 @@
   border-radius: 12px;
   border: 1px solid var(--line);
   background: #000;
-  margin: 8px 0 18px;
-}
-
-.theme-light .done-empty {
-  border: 1px dashed var(--line);
-  border-radius: 12px;
-  padding: 26px;
-  text-align: center;
-  color: var(--text-dim);
   margin: 8px 0 18px;
 }
 
@@ -739,6 +769,12 @@
   color: var(--danger);
 }
 
+/* 降级底图（无 Key / 加载失败）的说明：与 `.notice-warn` 同一个琥珀色语义，
+ * 但这条是"贴在图上"的浮层，所以只换文字色、不动底色。 */
+.theme-light .location-editor-note-warn {
+  color: var(--warn);
+}
+
 /* 窄屏：列表挪到上方、地图在下（左右排会两边都挤成一条缝） */
 @media (max-width: 720px) {
 
@@ -846,5 +882,273 @@
   /* 显式写一次，防止将来有人删掉 `.stage` 的基础规则导致画布透明 */
   background: var(--bg);
   color: var(--text);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+ * 阶段 17：与深色独立版对齐的「组件语法」
+ *
+ * 对齐的不是配色（浅色版必须保持浅色，才不撕裂主应用），而是**同一批状态
+ * 在两个主题里长得一样**：
+ *
+ *   | 语义        | 浅色（本文件）        | 深色（theme-dark/styles.css） |
+ *   | ----------- | --------------------- | ----------------------------- |
+ *   | 提示条      | `.notice`             | `.setup-hint` / `.topbar-note`|
+ *   | 空状态      | `.empty`              | `.empty`                      |
+ *   | 键盘焦点    | `:focus-visible` 2px  | 同左                          |
+ *   | 触摸目标    | 窄屏 ≥ 36px           | 同左                          |
+ *
+ * 只新增类、不改旧类名，是为了让既有测试（`Landing.qa.test.tsx` /
+ * `EmbedGuidance.test.tsx`）与既有的 `.hint` / `.error` 文案断言继续成立。
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* ── 键盘焦点：全主题统一口径 ──────────────────────────────────
+ * 只在 `:focus-visible` 时画环：鼠标点击不出现"焦点框套在按钮上"的脏边，
+ * 键盘 Tab 一定看得见。深色版每个可点元素都要有对应的一条（见那份文件末）。
+ */
+.theme-light .btn:focus-visible,
+.theme-light .location-editor-item:focus-visible,
+.theme-light .privacy-how summary:focus-visible,
+.theme-light .photo-transport select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 深色底上的主按钮（渐变蓝）需要浅色环才看得见；这里用白色双环——
+ * 外圈 accent、内圈白，落在渐变与白底上都够。 */
+.theme-light .btn-primary:focus-visible {
+  outline-color: #0b5f8a;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(14, 123, 181, 0.25);
+}
+
+/* ── 提示条（降级 / 警告 / 错误）───────────────────────────────
+ * 三段式：`notice`（容器）+ `notice-title` + `notice-body`。
+ * 之前这些信息是一行 `.hint` 或纯文本 `.error`，在长页面里会被当成装饰；
+ * 左侧 3px 色条把"这条要读"与"这句可以略过"区分开。
+ */
+.theme-light .notice {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: #ffffff;
+  padding: 10px 12px;
+  margin: 0 0 14px;
+}
+
+.theme-light .notice-title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.theme-light .notice-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+
+.theme-light .notice-warn {
+  border-left-color: var(--warn);
+  background: #fffbf2;
+}
+
+.theme-light .notice-error {
+  border-left-color: var(--danger);
+  background: #fff6f5;
+}
+
+/* ── 空状态 ───────────────────────────────────────────────────
+ * 用一个虚线卡片承载「为什么空 + 下一步做什么」，而不是把一句话丢在空白里。
+ * 与深色版 `.empty` 同一套结构（标题 / 说明 / 动作），只是配色跟随主题。
+ */
+.theme-light .empty {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 30px 22px;
+  text-align: center;
+  margin: 8px 0 18px;
+}
+
+.theme-light .empty-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.theme-light .empty-body {
+  margin: 0 auto 14px;
+  max-width: 48ch;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--text-dim);
+}
+
+.theme-light .empty-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── 表单：路段交通工具 ───────────────────────────────────────
+ * 与深色版 `.transport-row` / `.transport-select` 对齐：标签走等宽小字，
+ * 下拉框不再是大号系统控件。 */
+.theme-light .photo-transport > span {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.theme-light .photo-transport select {
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.theme-light .photo-transport select:hover {
+  border-color: #c3d3e4;
+}
+
+/* 「待定位」徽标：琥珀底纹（深色版 `.photo-badge` 同一语义），
+ * 只靠文字色在浅底上太弱。 */
+.theme-light .badge-warn {
+  background: #fff7e8;
+}
+
+/* 页脚按钮旁的一行说明（例如"还差 1 张"） */
+.theme-light .hint-inline {
+  margin: 0;
+}
+
+/* 进度百分比读数：等宽数字，宽度固定，避免 9%→10% 时控件横向抖一下 */
+.theme-light .seek-value {
+  flex: 0 0 auto;
+  min-width: 38px;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* 键盘快捷键提示（播放页左下角，窄屏隐藏）。
+ * 抬高到 92px：降级格网会在左下角打印 `GRID 0.05° Z13.0`，两条叠在一起谁都读不清。 */
+.theme-light .stage-keys {
+  position: absolute;
+  left: 20px;
+  bottom: 92px;
+  z-index: 6;
+  margin: 0;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+}
+
+/* 控制条在 900px 以下会占满整行，左下角的快捷键提示会与它重叠 —— 提前收掉。 */
+@media (max-width: 900px) {
+  .theme-light .stage-keys {
+    display: none;
+  }
+}
+
+/* ── 窄屏补强：620px（控件/表头换行）与 420px（按钮通栏）────────
+ * 文件中部那条 620px 只管编辑页照片行与播放控件换行；小屏上真正的问题是：
+ *  - 首屏/完成页的按钮并排时每个都不到 44px 宽，拇指点不准；
+ *  - 编辑页的页脚按钮和"还差几张"挤在一行；
+ *  - 补位置页的头部两栏（标题 + 全部跳过）在 360px 下重叠。
+ */
+@media (max-width: 620px) {
+  .theme-light .panel {
+    padding: 28px 14px 72px;
+  }
+
+  .theme-light .panel-head {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .theme-light .panel-foot .btn {
+    width: 100%;
+  }
+
+  .theme-light .stage-top {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+  }
+
+  .theme-light .stage-note {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+
+  .theme-light .seek-value {
+    order: 4;
+  }
+
+  .theme-light .location-editor-head {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 14px 10px;
+  }
+
+  .theme-light .done-actions .btn {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 420px) {
+  .theme-light .landing {
+    padding: 28px 14px 72px;
+  }
+
+  .theme-light .landing-actions .btn {
+    width: 100%;
+  }
+
+  .theme-light .landing-actions,
+  .theme-light .done-actions {
+    gap: 8px;
+  }
+
+  .theme-light .done-actions .btn {
+    width: 100%;
+  }
+
+  .theme-light .identity-badge {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+/* 触摸目标：窄屏下 `.btn-tiny`（26px 高）太矮，抬到 32px。
+ * 只抬高度、不动字号，避免整页换行节奏变化。 */
+@media (max-width: 620px), (pointer: coarse) {
+  .theme-light .btn-tiny {
+    min-height: 32px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+/* ── 减少动态效果：与深色版同名规则对齐 ───────────────────────
+ * 系统开了「减少动态效果」时，装饰性过渡一律取消（轨迹播放由 JS 判断）。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .theme-light .btn,
+  .theme-light .photo-item,
+  .theme-light .location-editor-item,
+  .theme-light .stage-scrim,
+  .theme-light .seek::-webkit-slider-thumb,
+  .theme-light .seek::-moz-range-thumb {
+    transition: none !important;
+  }
 }
 

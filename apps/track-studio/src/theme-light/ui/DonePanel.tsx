@@ -34,9 +34,12 @@ export function DonePanel(props: DonePanelProps): JSX.Element {
       {videoUrl ? (
         <video className="done-video" src={videoUrl} controls playsInline preload="metadata" />
       ) : (
-        <div className="done-empty">
-          <p>视频录制不可用。</p>
-          <p className="hint">桌面 Chrome / Edge / Firefox 支持导出 WebM；移动端请用系统录屏。</p>
+        <div className="empty">
+          <p className="empty-title">这个浏览器没有产出视频</p>
+          <p className="empty-body">
+            桌面 Chrome / Edge / Firefox 支持导出 WebM；移动端请用系统录屏，
+            或者直接下载下面的 journey.json。
+          </p>
         </div>
       )}
 

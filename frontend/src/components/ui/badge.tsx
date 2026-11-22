@@ -12,8 +12,10 @@ const badgeVariants = cva(
         secondary: 'border-transparent bg-secondary text-secondary-foreground',
         destructive: 'border-transparent bg-destructive text-destructive-foreground shadow-sm',
         outline: 'border-border text-foreground',
-        /** 密码学/验证态专用：支付级别的安全语义要有独立色，不能和普通标签混。 */
-        secure: 'border-emerald-300 bg-emerald-50 text-emerald-800',
+        /** 密码学/验证态专用：支付级别的安全语义要有独立色，不能和普通标签混。
+         * 深色主题下换成深绿底 + 亮绿字，否则一块亮色补丁会从深色壳里跳出来。 */
+        secure:
+          'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
         muted: 'border-border bg-muted text-muted-foreground',
       },
     },

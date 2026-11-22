@@ -63,7 +63,7 @@ export function ImportCard({ importing, error, view, onFile, onViewOnMap }: Impo
       <CardContent className="space-y-4">
         <label
           htmlFor="share-file-input"
-          className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-border bg-muted/30 px-6 py-8 text-center transition-colors hover:border-primary/60 hover:bg-accent/60"
+          className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-border bg-muted/30 px-6 py-8 text-center transition-colors hover:border-primary/60 hover:bg-accent/10"
         >
           <Upload className="mb-1 h-6 w-6 text-muted-foreground" />
           <span className="text-sm font-medium">点击选择信物文件</span>

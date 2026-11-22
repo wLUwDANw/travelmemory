@@ -52,10 +52,11 @@ export function DonePanel({
         {videoUrl ? (
           <video className="done-video" src={videoUrl} controls playsInline preload="metadata" />
         ) : (
-          <div className="done-empty">
-            <div>视频录制不可用。</div>
-            <div style={{ marginTop: 6, fontSize: 11 }}>
-              桌面 Chrome / Edge / Firefox 支持导出 WebM；移动端请用系统录屏。
+          <div className="empty">
+            <div className="empty-title">这个浏览器没有产出视频</div>
+            <div className="empty-body">
+              桌面 Chrome / Edge / Firefox 支持导出 WebM；移动端请用系统录屏，
+              或者导出下面的 journey.json。
             </div>
           </div>
         )}

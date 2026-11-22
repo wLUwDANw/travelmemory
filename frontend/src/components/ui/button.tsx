@@ -23,7 +23,10 @@ const buttonVariants = cva(
           'border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground hover:shadow-md',
         secondary:
           'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground',
+        /** 无底按钮只做"表面提亮"，不再拿品牌绿当 hover 背景。
+         *  旧写法 `hover:bg-accent` 在本项目里等于深绿底 + 深色字（`--accent` 是品牌绿，
+         *  不是 shadcn 默认的浅灰），hover 一下图标按钮就变成"黑底黑字"。 */
+        ghost: 'hover:bg-muted hover:text-foreground',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

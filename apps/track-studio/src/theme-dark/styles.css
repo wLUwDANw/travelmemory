@@ -636,7 +636,9 @@
 }
 
 .theme-dark .hud-tr {
-  top: 18px;
+  /* 播放页右上角还有「导出视频」（top:18 / height:26）。原来两者都锚在 top:18，
+   * 导出按钮直接盖住日期 —— 把日期这一角整体下移到按钮下方。 */
+  top: 56px;
   right: 22px;
   text-align: right;
 }
@@ -1170,16 +1172,6 @@
   background: #000;
 }
 
-.theme-dark .done-empty {
-  margin: 12px 0 16px;
-  padding: 20px;
-  text-align: center;
-  color: var(--muted);
-  font-size: 12px;
-  border: 1px dashed var(--line);
-  border-radius: 4px;
-}
-
 .theme-dark .done-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1194,5 +1186,169 @@
   letter-spacing: 0.04em;
   color: var(--muted);
   word-break: break-all;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+ * 阶段 17：与浅色嵌入版对齐的「组件语法」
+ *
+ * 深色版是"独立桌面页"，浅色版是"主应用里的 iframe"。两者配色必须不同，
+ * 但**可交互元素的行为语言必须相同**：焦点在哪看得见、空状态怎么表述、
+ * 窗口变窄时先牺牲什么。这一段只补这三件事，不动既有配色与排版。
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* 键盘焦点：与浅色版同口径（2px 实线 + 2px 偏移）。深色底上用 accent-2（浅青）
+ * 而不是 accent（青绿），在近黑背景上更亮、更不容易和轨迹的青色混淆。 */
+.theme-dark .btn:focus-visible,
+.theme-dark .chip:focus-visible,
+.theme-dark .demo-card:focus-visible,
+.theme-dark .photo-cell:focus-visible,
+.theme-dark .back-btn:focus-visible,
+.theme-dark .export-btn:focus-visible,
+.theme-dark .tl-btn:focus-visible,
+.theme-dark .speed-btn:focus-visible,
+.theme-dark .replay-btn:focus-visible,
+.theme-dark .transport-select:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+/* 空状态：结构与浅色版 `.empty` 完全一致（标题 / 说明 / 动作），
+ * 只是把白底换成"比面板再暗一档"的半透明底，虚线边界沿用 --line。 */
+.theme-dark .empty {
+  margin: 12px 0 16px;
+  padding: 26px 20px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  background: rgba(8, 14, 24, 0.5);
+}
+
+.theme-dark .empty-title {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--text);
+}
+
+.theme-dark .empty-body {
+  margin: 8px auto 0;
+  max-width: 46ch;
+  font-size: 11px;
+  line-height: 1.9;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.theme-dark .empty-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 导入失败：与浅色版的 `.notice-error` 同一语义。深色 token 里没有 danger，
+ * 用 warn（琥珀）—— 它在这套配色里本来就是"需要你看一眼"的颜色。 */
+.theme-dark .setup-hint-error {
+  color: var(--warn);
+}
+
+/* ── 窄屏：布局先塌成单列，再压缩控件 ─────────────────────────
+ * 深色版原本按 1440×900 的桌面舞台设计：420px 侧栏 + 地图。
+ * 窗口窄到 900px 以下时两栏各剩不到 300px，照片格与地图都没法用，
+ * 所以先塌成"上：照片与路段 / 下：地图"，地图固定 42vh 仍可点。
+ */
+@media (max-width: 900px) {
+  .theme-dark .setup {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 42vh;
+  }
+
+  .theme-dark .setup-side {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .theme-dark .photo-grid {
+    /* 侧栏占满整行后反而更宽，保持 3 列即可；不要再加列 —— 缩略图会小到看不清 */
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .theme-dark .transport-list {
+    max-height: 24vh;
+  }
+
+  .theme-dark .setup-map {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .theme-dark .photo-grid {
+    padding: 12px;
+  }
+
+  .theme-dark .timeline {
+    height: 56px;
+    padding: 0 10px;
+    gap: 8px;
+  }
+
+  .theme-dark .tl-track,
+  .theme-dark .tl-track canvas {
+    height: 56px;
+  }
+
+  .theme-dark .hud-bl,
+  .theme-dark .hud-br {
+    bottom: 78px;
+  }
+
+  .theme-dark .hud-tl,
+  .theme-dark .hud-tr {
+    padding: 8px 10px;
+  }
+
+  .theme-dark .hud-value {
+    min-width: 84px;
+  }
+
+  .theme-dark .play-note {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+
+  .theme-dark .tl-right {
+    gap: 2px;
+  }
+
+  .theme-dark .speed-btn {
+    min-width: 26px;
+    padding: 0 4px;
+  }
+
+  .theme-dark .done-actions .btn,
+  .theme-dark .landing-actions .btn {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 420px) {
+  .theme-dark .done-actions .btn,
+  .theme-dark .landing-actions .btn {
+    width: 100%;
+  }
+
+  .theme-dark .photo-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .theme-dark .hud-brand {
+    letter-spacing: 0.24em;
+  }
+
+  .theme-dark .hud-caption-text {
+    font-size: 18px;
+  }
 }
 

@@ -46,6 +46,8 @@ NOT RUN / 未实测（真高德底图、真机 MediaRecorder、真实 EXIF 点�
 | [stage14-e2e-and-light-playstage.md](./stage14-e2e-and-light-playstage.md) | 阶段 14：端到端验证 + 浅色播放页 + 省界轮廓 | 未验证 | W14-3 真实 EXIF 点选、W14-5 市级边界 NOT RUN |
 | [stage15-p1-fix-receive-library.md](./stage15-p1-fix-receive-library.md) | 阶段 15：P1 修复 + 技术卫生 + 接收端 + 记忆库分类 | 未验证 | 886/984 条测试全绿；导回日期/坐标 P1 留到阶段 16 |
 | [stage16-gate-and-truth.md](./stage16-gate-and-truth.md) | 阶段 16：门禁与真相（CI + 清理 + 收敛） | 未验证 | 643/954 全绿；ruff/mypy/边界/索引/生成物全绿；Actions 首跑待推送；地图加载器合并留到阶段 17 |
+| [stage17-light-dark-visual-alignment.md](./stage17-light-dark-visual-alignment.md) | 阶段 17：浅色嵌入版 × 深色独立版视觉对齐（提示条/空状态/焦点/窄屏） | 未验证 | track-studio 175 条全绿；类型/构建/无头 Edge 走查通过；真高德与真机 NOT RUN |
+| [stage18-main-app-dark-theme.md](./stage18-main-app-dark-theme.md) | 阶段 18：主应用黑底黑字、关闭按钮重叠与深浅主题切换 | 未验证 | frontend 429 条通过（7 条 CRLF 既有失败）；类型/构建/无头 Edge 走查通过；深色高德底图与真机 NOT RUN |
 
 ## 每份文档固定包含
 

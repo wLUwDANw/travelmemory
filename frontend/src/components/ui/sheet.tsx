@@ -72,7 +72,10 @@ const SheetContent = React.forwardRef<
     >
       {children}
       {showClose && (
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+        /* 关闭按钮：32×32 的点击区（原来是 16px 的图标本身，手指几乎点不到）。
+         * `right-3` + 32px 宽 → 内容区右侧必须留出 ≥ 44px 的空白（见 ChatPanel 的
+         * `pr-14`），否则会和头部最右边的按钮叠在一起 —— 这正是本次修的 bug。 */
+        <DialogPrimitive.Close className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-md text-foreground opacity-70 ring-offset-background transition hover:bg-accent hover:text-accent-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
           <X className="h-4 w-4" />
           <span className="sr-only">关闭</span>
         </DialogPrimitive.Close>

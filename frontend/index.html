@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>旅忆地图 TravelMemory</title>
+    <!-- 首屏主题：必须在 CSS/React 之前同步执行，否则深色用户每次刷新都会先看到一帧白底。
+         规则与 src/lib/theme.ts 的 resolveInitialTheme() 完全一致（键名 tm-theme、类名 dark）：
+         用户显式选过就听用户的，否则跟随系统。改一处必须改两处。 -->
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('tm-theme');
+          var dark =
+            stored === 'dark' ||
+            (stored === null &&
+              typeof window.matchMedia === 'function' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        } catch (error) {
+          /* 隐私模式禁用 localStorage：按浅色先画，主题按钮仍可切换 */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
